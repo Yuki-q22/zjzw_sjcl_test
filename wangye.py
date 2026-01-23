@@ -1754,16 +1754,29 @@ def convert_to_college_score_format(conversion_data):
     if not conversion_data:
         return []
     
+    # 辅助函数：安全地处理空值，将None、NaN等转换为空字符串
+    def safe_str(value, default=''):
+        """安全地将值转换为字符串，处理None、NaN等情况"""
+        if value is None:
+            return default
+        if pd.isna(value):
+            return default
+        value_str = str(value).strip()
+        # 检查是否为'nan'、'None'等字符串
+        if value_str.lower() in ['nan', 'none', '']:
+            return default
+        return value_str
+    
     # 构建分组键：省份、学校、科类、批次、招生类型、层次、专业组代码
     # 如果专业组代码为空，则不包含在分组键中
     def get_group_key(item):
-        province = str(item.get('省份', '') or '').strip()
-        school = str(item.get('学校', '') or '').strip()
-        subject = str(item.get('科类', '') or '').strip()
-        batch = str(item.get('批次', '') or '').strip()
-        recruit_type = str(item.get('招生类型', '') or '').strip()
-        level = str(item.get('层次', '') or '').strip()
-        group_code = str(item.get('专业组代码', '') or '').strip()
+        province = safe_str(item.get('省份', ''))
+        school = safe_str(item.get('学校', ''))
+        subject = safe_str(item.get('科类', ''))
+        batch = safe_str(item.get('批次', ''))
+        recruit_type = safe_str(item.get('招生类型', ''))
+        level = safe_str(item.get('层次', ''))
+        group_code = safe_str(item.get('专业组代码', ''))
         
         # 如果专业组代码为空或只有^，则不包含在分组键中
         if not group_code or group_code == '^' or group_code == '':
@@ -1789,30 +1802,30 @@ def convert_to_college_score_format(conversion_data):
         total_recruit_num = 0
         for item in items:
             recruit_num = item.get('招生人数', '') or ''
-            if recruit_num:
+            if recruit_num and not pd.isna(recruit_num):
                 try:
                     total_recruit_num += float(str(recruit_num))
                 except:
                     pass
         
         # 处理专业组代码：如果为空或只有^，则设为空字符串
-        group_code = str(base_item.get('专业组代码', '') or '').strip().lstrip('^')
+        group_code = safe_str(base_item.get('专业组代码', '')).lstrip('^')
         if not group_code or group_code == '^':
             group_code = ''
         
         # 处理院校招生代码：去除开头的^符号
-        recruit_code = str(base_item.get('招生代码', '') or '').strip().lstrip('^')
+        recruit_code = safe_str(base_item.get('招生代码', '')).lstrip('^')
         
         # 处理招生人数：保持为字符串格式（文本格式）
         recruit_num_str = str(int(total_recruit_num)) if total_recruit_num > 0 else ''
         
         # 构建院校分记录
         college_record = {
-            '学校名称': str(base_item.get('学校', '') or '').strip(),
-            '省份': str(base_item.get('省份', '') or '').strip(),
-            '招生类别': str(base_item.get('科类', '') or '').strip(),
-            '招生批次': str(base_item.get('批次', '') or '').strip(),
-            '招生类型': str(base_item.get('招生类型', '') or '').strip(),
+            '学校名称': safe_str(base_item.get('学校', '')),
+            '省份': safe_str(base_item.get('省份', '')),
+            '招生类别': safe_str(base_item.get('科类', '')),
+            '招生批次': safe_str(base_item.get('批次', '')),
+            '招生类型': safe_str(base_item.get('招生类型', '')),
             '选测等级': '',
             '最高分': '',
             '最低分': '',
@@ -1822,7 +1835,7 @@ def convert_to_college_score_format(conversion_data):
             '平均位次': '',
             '录取人数': '',
             '招生人数': recruit_num_str,
-            '数据来源': str(base_item.get('数据来源', '') or '').strip(),
+            '数据来源': safe_str(base_item.get('数据来源', '')),
             '省控线科类': '',
             '省控线批次': '',
             '省控线备注': '',
@@ -1897,6 +1910,15 @@ def export_college_score_data_to_excel(college_score_data, conversion_data, outp
     for row_idx, row_data in enumerate(college_score_data, start=4):
         for col_idx, header in enumerate(headers, start=1):
             value = row_data.get(header, '')
+            
+            # 处理空值：将None、NaN、'nan'字符串等转换为空字符串
+            if value is None or pd.isna(value):
+                value = ''
+            elif isinstance(value, str):
+                # 检查是否为'nan'、'None'等字符串
+                if value.lower() in ['nan', 'none']:
+                    value = ''
+            
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             
             # 设置文本格式的列：招生人数、专业组代码、院校招生代码
@@ -1905,6 +1927,8 @@ def export_college_score_data_to_excel(college_score_data, conversion_data, outp
                 # 确保值为字符串格式，并设置为文本格式
                 if value is not None and value != '':
                     cell.value = str(value)
+                else:
+                    cell.value = ''  # 确保空值写入为空字符串
                 cell.number_format = numbers.FORMAT_TEXT
     
     wb.save(output_path)
