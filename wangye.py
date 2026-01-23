@@ -1041,7 +1041,7 @@ def images_to_pdf(image_paths, pdf_path):
 # Streamlit页面布局
 # ============================
 # 页面标题
-st.title("📊 数据处理工具——测试")
+st.title("📊 数据处理工具")
 st.markdown("---")
 
 # 功能说明
@@ -2064,75 +2064,41 @@ with tab7:
                     st.dataframe(df_display, use_container_width=True, hide_index=True)
                 
                 # 导出按钮
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("导出比对1结果", key="export_ps", use_container_width=True):
-                        try:
-                            export_data = []
-                            for r in results:
-                                export_data.append({
-                                    '序号': r['index'],
-                                    '年份': r['keyFields']['年份'],
-                                    '省份': r['keyFields']['省份'],
-                                    '学校': r['keyFields']['学校'],
-                                    '科类': r['keyFields']['科类'],
-                                    '批次': r['keyFields']['批次'],
-                                    '专业': r['keyFields']['专业'],
-                                    '层次': r['keyFields']['层次'],
-                                    '专业组代码': r['keyFields']['专业组代码'],
-                                    '招生人数': r['otherInfo']['招生人数'],
-                                    '学费': r['otherInfo']['学费'],
-                                    '学制': r['otherInfo']['学制'],
-                                    '专业代码': r['otherInfo']['专业代码'],
-                                    '匹配状态': '存在' if r['exists'] else '不存在',
-                                    '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
-                                })
-                            
-                            output = BytesIO()
-                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
-                            
-                            output.seek(0)
-                            st.download_button(
-                                "📥 下载比对1结果",
-                                output,
-                                file_name=f"比对1_招生计划vs专业分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                        except Exception as e:
-                            st.error(f"导出失败: {str(e)}")
-                
-                with col2:
-                    unmatched_results = [r for r in results if not r['exists']]
-                    if len(unmatched_results) > 0:
-                        if st.button("导出未匹配数据为专业分格式", key="export_ps_unmatched", use_container_width=True):
-                            try:
-                                # 提取原始数据
-                                conversion_data = []
-                                for r in unmatched_results:
-                                    original_idx = r['originalIndex']
-                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
-                                
-                                # 转换数据
-                                converted_data = convert_data(conversion_data)
-                                
-                                # 导出
-                                output = BytesIO()
-                                temp_path = "temp_converted.xlsx"
-                                export_converted_data_to_excel(converted_data, conversion_data, temp_path)
-                                
-                                with open(temp_path, 'rb') as f:
-                                    st.download_button(
-                                        "📥 下载转换后的专业分数据",
-                                        f.read(),
-                                        file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                    )
-                                
-                                os.remove(temp_path)
-                                st.success(f"转换完成！共转换 {len(converted_data)} 条数据")
-                            except Exception as e:
-                                st.error(f"转换失败: {str(e)}")
+                if st.button("导出比对1结果", key="export_ps", use_container_width=True):
+                    try:
+                        export_data = []
+                        for r in results:
+                            export_data.append({
+                                '序号': r['index'],
+                                '年份': r['keyFields']['年份'],
+                                '省份': r['keyFields']['省份'],
+                                '学校': r['keyFields']['学校'],
+                                '科类': r['keyFields']['科类'],
+                                '批次': r['keyFields']['批次'],
+                                '专业': r['keyFields']['专业'],
+                                '层次': r['keyFields']['层次'],
+                                '专业组代码': r['keyFields']['专业组代码'],
+                                '招生人数': r['otherInfo']['招生人数'],
+                                '学费': r['otherInfo']['学费'],
+                                '学制': r['otherInfo']['学制'],
+                                '专业代码': r['otherInfo']['专业代码'],
+                                '匹配状态': '存在' if r['exists'] else '不存在',
+                                '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
+                            })
+                        
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+                        
+                        output.seek(0)
+                        st.download_button(
+                            "📥 下载比对1结果",
+                            output,
+                            file_name=f"比对1_招生计划vs专业分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    except Exception as e:
+                        st.error(f"导出失败: {str(e)}")
             else:
                 st.info("暂无比对结果，请先执行比对")
         
@@ -2211,152 +2177,167 @@ with tab7:
                     st.dataframe(df_display, use_container_width=True, hide_index=True)
                 
                 # 导出按钮
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("导出比对2结果", key="export_pc", use_container_width=True):
-                        try:
-                            export_data = []
-                            for r in results:
-                                export_data.append({
-                                    '序号': r['index'],
-                                    '年份': r['keyFields']['年份'],
-                                    '省份': r['keyFields']['省份'],
-                                    '学校': r['keyFields']['学校'],
-                                    '科类': r['keyFields']['科类'],
-                                    '批次': r['keyFields']['批次'],
-                                    '专业组代码': r['keyFields']['专业组代码'],
-                                    '专业': r['otherInfo']['专业'],
-                                    '层次': r['otherInfo']['层次'],
-                                    '招生人数': r['otherInfo']['招生人数'],
-                                    '匹配状态': '存在' if r['exists'] else '不存在',
-                                    '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
-                                })
-                            
-                            output = BytesIO()
-                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
-                            
-                            output.seek(0)
-                            st.download_button(
-                                "📥 下载比对2结果",
-                                output,
-                                file_name=f"比对2_招生计划vs院校分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                        except Exception as e:
-                            st.error(f"导出失败: {str(e)}")
-                
-                with col2:
-                    unmatched_results = [r for r in results if not r['exists']]
-                    if len(unmatched_results) > 0:
-                        if st.button("导出未匹配数据为专业分格式", key="export_pc_unmatched", use_container_width=True):
-                            try:
-                                # 提取原始数据
-                                conversion_data = []
-                                for r in unmatched_results:
-                                    original_idx = r['originalIndex']
-                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
-                                
-                                # 转换数据
-                                converted_data = convert_data(conversion_data)
-                                
-                                # 导出
-                                output = BytesIO()
-                                temp_path = "temp_converted.xlsx"
-                                export_converted_data_to_excel(converted_data, conversion_data, temp_path)
-                                
-                                with open(temp_path, 'rb') as f:
-                                    st.download_button(
-                                        "📥 下载转换后的专业分数据",
-                                        f.read(),
-                                        file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                    )
-                                
-                                os.remove(temp_path)
-                                st.success(f"转换完成！共转换 {len(converted_data)} 条数据")
-                            except Exception as e:
-                                st.error(f"转换失败: {str(e)}")
+                if st.button("导出比对2结果", key="export_pc", use_container_width=True):
+                    try:
+                        export_data = []
+                        for r in results:
+                            export_data.append({
+                                '序号': r['index'],
+                                '年份': r['keyFields']['年份'],
+                                '省份': r['keyFields']['省份'],
+                                '学校': r['keyFields']['学校'],
+                                '科类': r['keyFields']['科类'],
+                                '批次': r['keyFields']['批次'],
+                                '专业组代码': r['keyFields']['专业组代码'],
+                                '专业': r['otherInfo']['专业'],
+                                '层次': r['otherInfo']['层次'],
+                                '招生人数': r['otherInfo']['招生人数'],
+                                '匹配状态': '存在' if r['exists'] else '不存在',
+                                '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
+                            })
+                        
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+                        
+                        output.seek(0)
+                        st.download_button(
+                            "📥 下载比对2结果",
+                            output,
+                            file_name=f"比对2_招生计划vs院校分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    except Exception as e:
+                        st.error(f"导出失败: {str(e)}")
             else:
                 st.info("暂无比对结果，请先执行比对")
         
-        # 导出全部结果按钮
+        # 全局导出区域
         if len(st.session_state.plan_score_results) > 0 or len(st.session_state.plan_college_results) > 0:
             st.markdown("---")
-            if st.button("📊 导出全部结果", use_container_width=True):
-                try:
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        # 比对1结果
-                        if len(st.session_state.plan_score_results) > 0:
-                            export_data = []
-                            for r in st.session_state.plan_score_results:
-                                export_data.append({
-                                    '序号': r['index'],
-                                    '年份': r['keyFields']['年份'],
-                                    '省份': r['keyFields']['省份'],
-                                    '学校': r['keyFields']['学校'],
-                                    '科类': r['keyFields']['科类'],
-                                    '批次': r['keyFields']['批次'],
-                                    '专业': r['keyFields']['专业'],
-                                    '层次': r['keyFields']['层次'],
-                                    '专业组代码': r['keyFields']['专业组代码'],
-                                    '招生人数': r['otherInfo']['招生人数'],
-                                    '学费': r['otherInfo']['学费'],
-                                    '学制': r['otherInfo']['学制'],
-                                    '专业代码': r['otherInfo']['专业代码'],
-                                    '匹配状态': '存在' if r['exists'] else '不存在',
-                                    '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
-                                })
-                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+            st.markdown("### 📤 全局导出功能")
+            
+            # 收集所有未匹配的数据
+            all_unmatched_results = []
+            if len(st.session_state.plan_score_results) > 0:
+                all_unmatched_results.extend([r for r in st.session_state.plan_score_results if not r['exists']])
+            if len(st.session_state.plan_college_results) > 0:
+                all_unmatched_results.extend([r for r in st.session_state.plan_college_results if not r['exists']])
+            
+            # 使用两列布局，突出显示"导出未匹配数据为专业分格式"
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                if st.button("📊 导出全部结果", use_container_width=True):
+                    try:
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            # 比对1结果
+                            if len(st.session_state.plan_score_results) > 0:
+                                export_data = []
+                                for r in st.session_state.plan_score_results:
+                                    export_data.append({
+                                        '序号': r['index'],
+                                        '年份': r['keyFields']['年份'],
+                                        '省份': r['keyFields']['省份'],
+                                        '学校': r['keyFields']['学校'],
+                                        '科类': r['keyFields']['科类'],
+                                        '批次': r['keyFields']['批次'],
+                                        '专业': r['keyFields']['专业'],
+                                        '层次': r['keyFields']['层次'],
+                                        '专业组代码': r['keyFields']['专业组代码'],
+                                        '招生人数': r['otherInfo']['招生人数'],
+                                        '学费': r['otherInfo']['学费'],
+                                        '学制': r['otherInfo']['学制'],
+                                        '专业代码': r['otherInfo']['专业代码'],
+                                        '匹配状态': '存在' if r['exists'] else '不存在',
+                                        '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
+                                    })
+                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+                            
+                            # 比对2结果
+                            if len(st.session_state.plan_college_results) > 0:
+                                export_data = []
+                                for r in st.session_state.plan_college_results:
+                                    export_data.append({
+                                        '序号': r['index'],
+                                        '年份': r['keyFields']['年份'],
+                                        '省份': r['keyFields']['省份'],
+                                        '学校': r['keyFields']['学校'],
+                                        '科类': r['keyFields']['科类'],
+                                        '批次': r['keyFields']['批次'],
+                                        '专业组代码': r['keyFields']['专业组代码'],
+                                        '专业': r['otherInfo']['专业'],
+                                        '层次': r['otherInfo']['层次'],
+                                        '招生人数': r['otherInfo']['招生人数'],
+                                        '匹配状态': '存在' if r['exists'] else '不存在',
+                                        '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
+                                    })
+                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+                            
+                            # 统计报告
+                            summary_data = {
+                                '比对类型': ['比对1：招生计划 vs 专业分', '比对2：招生计划 vs 院校分'],
+                                '总记录数': [
+                                    len(st.session_state.plan_score_results),
+                                    len(st.session_state.plan_college_results)
+                                ],
+                                '匹配记录数': [
+                                    sum(1 for r in st.session_state.plan_score_results if r['exists']),
+                                    sum(1 for r in st.session_state.plan_college_results if r['exists'])
+                                ],
+                                '匹配率': [
+                                    f"{(sum(1 for r in st.session_state.plan_score_results if r['exists']) / len(st.session_state.plan_score_results) * 100):.1f}%" if len(st.session_state.plan_score_results) > 0 else "0%",
+                                    f"{(sum(1 for r in st.session_state.plan_college_results if r['exists']) / len(st.session_state.plan_college_results) * 100):.1f}%" if len(st.session_state.plan_college_results) > 0 else "0%"
+                                ]
+                            }
+                            pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='统计报告')
                         
-                        # 比对2结果
-                        if len(st.session_state.plan_college_results) > 0:
-                            export_data = []
-                            for r in st.session_state.plan_college_results:
-                                export_data.append({
-                                    '序号': r['index'],
-                                    '年份': r['keyFields']['年份'],
-                                    '省份': r['keyFields']['省份'],
-                                    '学校': r['keyFields']['学校'],
-                                    '科类': r['keyFields']['科类'],
-                                    '批次': r['keyFields']['批次'],
-                                    '专业组代码': r['keyFields']['专业组代码'],
-                                    '专业': r['otherInfo']['专业'],
-                                    '层次': r['otherInfo']['层次'],
-                                    '招生人数': r['otherInfo']['招生人数'],
-                                    '匹配状态': '存在' if r['exists'] else '不存在',
-                                    '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
-                                })
-                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
-                        
-                        # 统计报告
-                        summary_data = {
-                            '比对类型': ['比对1：招生计划 vs 专业分', '比对2：招生计划 vs 院校分'],
-                            '总记录数': [
-                                len(st.session_state.plan_score_results),
-                                len(st.session_state.plan_college_results)
-                            ],
-                            '匹配记录数': [
-                                sum(1 for r in st.session_state.plan_score_results if r['exists']),
-                                sum(1 for r in st.session_state.plan_college_results if r['exists'])
-                            ],
-                            '匹配率': [
-                                f"{(sum(1 for r in st.session_state.plan_score_results if r['exists']) / len(st.session_state.plan_score_results) * 100):.1f}%" if len(st.session_state.plan_score_results) > 0 else "0%",
-                                f"{(sum(1 for r in st.session_state.plan_college_results if r['exists']) / len(st.session_state.plan_college_results) * 100):.1f}%" if len(st.session_state.plan_college_results) > 0 else "0%"
-                            ]
-                        }
-                        pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='统计报告')
-                    
-                    output.seek(0)
-                    st.download_button(
-                        "📥 下载全部结果",
-                        output,
-                        file_name=f"数据比对结果汇总_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                except Exception as e:
-                    st.error(f"导出失败: {str(e)}")
+                        output.seek(0)
+                        st.download_button(
+                            "📥 下载全部结果",
+                            output,
+                            file_name=f"数据比对结果汇总_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    except Exception as e:
+                        st.error(f"导出失败: {str(e)}")
+            
+            with col2:
+                if len(all_unmatched_results) > 0:
+                    if st.button("⭐ 导出未匹配数据为专业分格式", type="primary", use_container_width=True):
+                        try:
+                            # 提取原始数据（去重，因为同一个记录可能在比对1和比对2中都未匹配）
+                            seen_indices = set()
+                            conversion_data = []
+                            for r in all_unmatched_results:
+                                original_idx = r['originalIndex']
+                                if original_idx not in seen_indices:
+                                    seen_indices.add(original_idx)
+                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
+                            
+                            # 转换数据
+                            converted_data = convert_data(conversion_data)
+                            
+                            # 导出
+                            output = BytesIO()
+                            temp_path = "temp_converted.xlsx"
+                            export_converted_data_to_excel(converted_data, conversion_data, temp_path)
+                            
+                            with open(temp_path, 'rb') as f:
+                                st.download_button(
+                                    "📥 下载转换后的专业分数据",
+                                    f.read(),
+                                    file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            
+                            os.remove(temp_path)
+                            st.success(f"转换完成！共转换 {len(converted_data)} 条数据（已去重）")
+                        except Exception as e:
+                            st.error(f"转换失败: {str(e)}")
+                else:
+                    st.info("暂无未匹配数据")
 
 
 # 页脚
