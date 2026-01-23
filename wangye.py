@@ -25,7 +25,7 @@ import io
 # ============================
 # 设置页面配置
 st.set_page_config(
-    page_title="数据处理工具——测试",
+    page_title="数据处理工具",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1041,7 +1041,7 @@ def images_to_pdf(image_paths, pdf_path):
 # Streamlit页面布局
 # ============================
 # 页面标题
-st.title("📊 数据处理工具——测试")
+st.title("📊 数据处理工具")
 st.markdown("---")
 
 # 功能说明
@@ -1441,23 +1441,922 @@ with tab6:
                 st.warning("未抓取到任何图片")
 
 
+# ============================
+# 招生计划数据比对与转换工具相关函数
+# ============================
+
+def generate_plan_score_key(item):
+    """生成招生计划 vs 专业分的组合键"""
+    year = str(item.get('年份', '') or '').strip()
+    province = str(item.get('省份', '') or '').strip()
+    school = str(item.get('学校', '') or '').strip()
+    subject = str(item.get('科类', '') or '').strip()
+    batch = str(item.get('批次', '') or '').strip()
+    major = str(item.get('专业', '') or '').strip()
+    level = str(item.get('层次', '') or '').strip()
+    group_code = str(item.get('专业组代码', '') or '').strip()
+    return f"{year}|{province}|{school}|{subject}|{batch}|{major}|{level}|{group_code}"
+
+def generate_plan_college_key(item):
+    """生成招生计划 vs 院校分的组合键"""
+    year = str(item.get('年份', '') or '').strip()
+    province = str(item.get('省份', '') or '').strip()
+    school = str(item.get('学校', '') or '').strip()
+    subject = str(item.get('科类', '') or '').strip()
+    batch = str(item.get('批次', '') or '').strip()
+    group_code = str(item.get('专业组代码', '') or '').strip()
+    return f"{year}|{province}|{school}|{subject}|{batch}|{group_code}"
+
+def compare_plan_vs_score(plan_df, score_df):
+    """比对招生计划 vs 专业分"""
+    plan_score_results = []
+    score_key_set = set()
+    
+    # 为专业分数据建立索引
+    for _, item in score_df.iterrows():
+        key = generate_plan_score_key(item.to_dict())
+        score_key_set.add(key)
+    
+    # 比对招生计划数据
+    for idx, row in plan_df.iterrows():
+        item = row.to_dict()
+        key = generate_plan_score_key(item)
+        exists = key in score_key_set
+        
+        plan_score_results.append({
+            'index': idx + 1,
+            'originalIndex': idx,
+            'keyFields': {
+                '年份': item.get('年份', '') or '',
+                '省份': item.get('省份', '') or '',
+                '学校': item.get('学校', '') or '',
+                '科类': item.get('科类', '') or '',
+                '批次': item.get('批次', '') or '',
+                '专业': item.get('专业', '') or '',
+                '层次': item.get('层次', '') or '',
+                '专业组代码': item.get('专业组代码', '') or ''
+            },
+            'exists': exists,
+            'otherInfo': {
+                '招生人数': item.get('招生人数', '') or '',
+                '学费': item.get('学费', '') or '',
+                '学制': item.get('学制', '') or '',
+                '专业代码': item.get('专业代码', '') or '',
+                '招生代码': item.get('招生代码', '') or '',
+                '数据来源': item.get('数据来源', '') or '',
+                '备注': item.get('备注', '') or '',
+                '招生类型': item.get('招生类型', '') or '',
+                '专业组选科要求': item.get('专业组选科要求', '') or '',
+                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
+            }
+        })
+    
+    return plan_score_results
+
+def compare_plan_vs_college(plan_df, college_df):
+    """比对招生计划 vs 院校分"""
+    plan_college_results = []
+    college_key_set = set()
+    
+    # 为院校分数据建立索引
+    for _, item in college_df.iterrows():
+        key = generate_plan_college_key(item.to_dict())
+        college_key_set.add(key)
+    
+    # 比对招生计划数据
+    for idx, row in plan_df.iterrows():
+        item = row.to_dict()
+        key = generate_plan_college_key(item)
+        exists = key in college_key_set
+        
+        plan_college_results.append({
+            'index': idx + 1,
+            'originalIndex': idx,
+            'keyFields': {
+                '年份': item.get('年份', '') or '',
+                '省份': item.get('省份', '') or '',
+                '学校': item.get('学校', '') or '',
+                '科类': item.get('科类', '') or '',
+                '批次': item.get('批次', '') or '',
+                '专业组代码': item.get('专业组代码', '') or ''
+            },
+            'exists': exists,
+            'otherInfo': {
+                '专业': item.get('专业', '') or '',
+                '层次': item.get('层次', '') or '',
+                '招生人数': item.get('招生人数', '') or '',
+                '学费': item.get('学费', '') or '',
+                '学制': item.get('学制', '') or '',
+                '专业代码': item.get('专业代码', '') or '',
+                '招生代码': item.get('招生代码', '') or '',
+                '数据来源': item.get('数据来源', '') or '',
+                '备注': item.get('备注', '') or '',
+                '招生类型': item.get('招生类型', '') or '',
+                '专业组选科要求': item.get('专业组选科要求', '') or '',
+                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
+            }
+        })
+    
+    return plan_college_results
+
+def get_first_subject(category):
+    """获取首选科目：根据招生科类的第一个字"""
+    if not category:
+        return ''
+    category_str = str(category)
+    if '物理类' in category_str or '物理' in category_str:
+        return '物'
+    elif '历史类' in category_str or '历史' in category_str:
+        return '历'
+    return ''
+
+def convert_level(level):
+    """转换层次字段"""
+    if not level:
+        return ''
+    level_str = str(level).lower()
+    if '专科' in level_str or '高职' in level_str:
+        return '专科(高职)'
+    elif '本科' in level_str:
+        return '本科(普通)'
+    return level
+
+def extract_required_subjects(text):
+    """提取必选科目（处理"物化生（3科必选）"格式）"""
+    if not text:
+        return []
+    
+    subjects = []
+    subject_map = {
+        '物理': '物', '化学': '化', '生物': '生', '历史': '历',
+        '地理': '地', '政治': '政', '技术': '技'
+    }
+    
+    # 清理文本，保留中文和顿号、逗号
+    import re
+    clean_text = re.sub(r'[^\u4e00-\u9fa5、，,]', '', str(text)).strip()
+    
+    # 处理"物化生（3科必选）"格式：直接提取括号前的内容
+    if '必选' in text and '（' in text and text.index('必选') > text.index('（'):
+        before_bracket = text.split('（')[0]
+        clean_text = before_bracket
+    
+    # 处理"物、化、生（3科必选）"格式：顿号分隔的科目
+    if '、' in clean_text or '，' in clean_text or ',' in clean_text:
+        normalized_text = re.sub(r'[、，]', ',', clean_text)
+        parts = [p.strip() for p in normalized_text.split(',') if p.strip()]
+        for part in parts:
+            for full_name, short_name in subject_map.items():
+                if full_name in part or part in full_name:
+                    if short_name not in subjects:
+                        subjects.append(short_name)
+                    break
+    else:
+        # 处理"物化生"这样的连续字符串
+        for full_name, short_name in subject_map.items():
+            if full_name in clean_text:
+                if short_name not in subjects:
+                    subjects.append(short_name)
+        
+        # 如果没匹配到全名，尝试按字符匹配
+        if len(subjects) == 0 and len(clean_text) > 0:
+            char_to_short_map = {
+                '物': '物', '化': '化', '生': '生', '历': '历',
+                '地': '地', '政': '政', '技': '技'
+            }
+            for char in clean_text:
+                if char in char_to_short_map and char_to_short_map[char] not in subjects:
+                    subjects.append(char_to_short_map[char])
+    
+    return subjects
+
+def convert_selection_requirement(group_requirement, major_requirement):
+    """转换选科要求"""
+    selection_requirement = ''
+    second_subject = ''
+    
+    # 合并两个要求字段
+    requirement = (str(group_requirement) if group_requirement else '') + (str(major_requirement) if major_requirement else '')
+    
+    # 清理特殊字符
+    import re
+    requirement = re.sub(r'^\^+', '', requirement).replace('^', '、').strip()
+    
+    if not requirement or requirement == '' or requirement == '、':
+        return selection_requirement, second_subject
+    
+    # 根据附件2示例处理各种情况
+    if '不限' in requirement or '再选不限' in requirement:
+        selection_requirement = '不限科目专业组'
+    elif '必选' in requirement:
+        required_subjects = extract_required_subjects(requirement)
+        if len(required_subjects) > 0:
+            selection_requirement = '单科、多科均需选考'
+            second_subject = ''.join(required_subjects)
+        
+        # 特殊处理：如果包含"首选"，可能需要排除首选科目
+        if '首选' in requirement:
+            preferred_subjects = []
+            if '首选物理' in requirement:
+                preferred_subjects.append('物')
+            if '首选历史' in requirement:
+                preferred_subjects.append('历')
+            
+            filtered_subjects = [s for s in required_subjects if s not in preferred_subjects]
+            if len(filtered_subjects) > 0:
+                second_subject = ''.join(filtered_subjects)
+    elif '首选' in requirement and '再选' in requirement:
+        re_select_part = requirement.split('再选')[1] if '再选' in requirement else ''
+        re_select_subjects = extract_required_subjects(re_select_part)
+        if len(re_select_subjects) > 0:
+            selection_requirement = '单科、多科均需选考'
+            second_subject = ''.join(re_select_subjects)
+    elif '或' in requirement or '选1' in requirement:
+        subjects = extract_required_subjects(requirement)
+        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
+        if len(filtered_subjects) > 0:
+            selection_requirement = '多门选考'
+            second_subject = ''.join(filtered_subjects)
+    else:
+        subjects = extract_required_subjects(requirement)
+        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
+        second_subject = ''.join(filtered_subjects)
+        if len(filtered_subjects) > 0:
+            selection_requirement = '单科、多科均需选考'
+    
+    return selection_requirement, second_subject
+
+def convert_to_text(value):
+    """转换为文本格式"""
+    if not value and value != 0:
+        return ''
+    text = str(value).lstrip('^').strip()
+    if text == '':
+        return ''
+    text = text.lstrip("'")
+    return text
+
+def convert_data(source_data):
+    """转换数据主函数"""
+    converted = []
+    
+    for row in source_data:
+        new_row = {}
+        
+        # 基础字段映射
+        new_row['学校名称'] = row.get('学校', '') or ''
+        new_row['省份'] = row.get('省份', '') or ''
+        new_row['招生专业'] = row.get('专业', '') or ''
+        new_row['招生科类'] = row.get('科类', '') or ''
+        new_row['招生批次'] = row.get('批次', '') or ''
+        new_row['招生类型（选填）'] = row.get('招生类型', '') or ''
+        new_row['专业备注（选填）'] = row.get('备注', '') or ''
+        new_row['招生人数（选填）'] = row.get('招生人数', '') or ''
+        new_row['数据来源'] = row.get('数据来源', '') or ''
+        
+        # 处理层次字段
+        new_row['一级层次'] = convert_level(row.get('层次', ''))
+        
+        # 处理代码字段（保持文本格式）
+        new_row['招生代码'] = convert_to_text(row.get('招生代码', ''))
+        new_row['专业代码'] = convert_to_text(row.get('专业代码', ''))
+        new_row['专业组代码'] = convert_to_text(row.get('专业组代码', ''))
+        
+        # 处理首选科目
+        new_row['首选科目'] = get_first_subject(row.get('科类', ''))
+        
+        # 处理选科要求
+        selection_requirement, second_subject = convert_selection_requirement(
+            row.get('专业组选科要求', ''),
+            row.get('专业选科要求(新高考专业省份)', '')
+        )
+        new_row['选科要求'] = selection_requirement
+        new_row['次选科目'] = second_subject
+        
+        # 其他字段（留空）
+        new_row['专业方向（选填）'] = ''
+        new_row['最高分'] = ''
+        new_row['最低分'] = ''
+        new_row['平均分'] = ''
+        new_row['最低分位次（选填）'] = ''
+        new_row['最低分数区间低'] = ''
+        new_row['最低分数区间高'] = ''
+        new_row['最低分数区间位次低'] = ''
+        new_row['最低分数区间位次高'] = ''
+        new_row['录取人数（选填）'] = ''
+        
+        converted.append(new_row)
+    
+    return converted
+
+def export_converted_data_to_excel(data, conversion_data, output_path):
+    """导出转换后的数据为Excel（保持与HTML中相同的格式）"""
+    from datetime import datetime
+    
+    # 创建工作簿
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    
+    # 第1行：备注（合并单元格）
+    remark_text = """备注：请删除示例后再填写；
+1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
+2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
+3.批次：（以下为19年使用批次）
+河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
+浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
+4.招生人数：仅能填写数字
+5.最高分、最低分、平均分：仅能填写数字，保留小数后两位，且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
+6.一级层次：限定"本科、专科（高职）"，该部分为招生专业对应的专业层次
+7.最低分位次：仅能填写数字;
+8.数据来源：必须限定——官方考试院、大红本数据、学校官网、销售、抓取、圣达信、优志愿、学业桥
+9.选科要求：不限科目专业组;多门选考;单科、多科均需选考
+10.选科科目必须是科目的简写（物、化、生、历、地、政、技）
+
+11.2020北京、海南，17-19上海仅限制本科专业组代码必填
+12.新八省首选科目必须选择（物理或历史）
+13.分数区间仅限北京"""
+    
+    ws.merge_cells('A1:Y1')
+    ws['A1'] = remark_text
+    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[1].height = 350
+    
+    # 第2行：招生年份
+    admission_year = ''
+    if conversion_data and len(conversion_data) > 0 and conversion_data[0].get('年份'):
+        admission_year = conversion_data[0]['年份']
+    ws['A2'] = '招生年份'
+    ws['B2'] = admission_year
+    
+    # 第3行：表头
+    headers = [
+        '学校名称', '省份', '招生专业', '专业方向（选填）', '专业备注（选填）',
+        '一级层次', '招生科类', '招生批次', '招生类型（选填）', '最高分',
+        '最低分', '平均分', '最低分位次（选填）', '招生人数（选填）',
+        '数据来源', '专业组代码', '首选科目', '选科要求', '次选科目',
+        '专业代码', '招生代码', '最低分数区间低', '最低分数区间高',
+        '最低分数区间位次低', '最低分数区间位次高', '录取人数（选填）'
+    ]
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=3, column=col_idx, value=header)
+    
+    # 数据行
+    for row_idx, row_data in enumerate(data, start=4):
+        for col_idx, header in enumerate(headers, start=1):
+            value = row_data.get(header, '')
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            # 设置代码列为文本格式
+            if header in ['专业组代码', '专业代码', '招生代码']:
+                cell.number_format = numbers.FORMAT_TEXT
+    
+    # 设置列宽
+    for col_idx in range(1, len(headers) + 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 9.36
+    
+    wb.save(output_path)
+
 # ====================== tab7：招生计划工具======================
-with tab7:  # 假设您在原有基础上增加了一个 tab
-    st.header("招生计划数据比对与转换工具")
-
-    # 获取 HTML 文件的路径
-    html_file_path = resource_path("264437b0-a2dc-4d9e-acfb-1f3509057ec1.html")
-
-    try:
-        with open(html_file_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-
-        # 使用 components.html 渲染，设置足够的高度
-        # scrolling=True 允许组件内部滚动
-        components.html(html_content, height=800, scrolling=True)
-
-    except FileNotFoundError:
-        st.error("找不到 HTML 工具文件，请确保文件已上传并路径正确。")
+with tab7:
+    st.header("🎓 招生计划数据比对与转换工具")
+    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分格式")
+    
+    # 初始化session state
+    if 'plan_data' not in st.session_state:
+        st.session_state.plan_data = None
+    if 'score_data' not in st.session_state:
+        st.session_state.score_data = None
+    if 'college_data' not in st.session_state:
+        st.session_state.college_data = None
+    if 'plan_score_results' not in st.session_state:
+        st.session_state.plan_score_results = []
+    if 'plan_college_results' not in st.session_state:
+        st.session_state.plan_college_results = []
+    
+    # 工作流步骤显示
+    col1, col2, col3, col4, col5 = st.columns([1, 0.3, 1, 0.3, 1])
+    with col1:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #e3f2fd; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">1</div>
+            <div>上传文件</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">2</div>
+            <div>数据比对</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col5:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">3</div>
+            <div>导出未匹配数据</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # 字段说明
+    with st.expander("📋 比对字段说明", expanded=False):
+        st.markdown("""
+        **比对1（招生计划 vs 专业分）：** 检查招生计划的记录是否在专业分中存在
+        - 匹配字段：年份、省份、学校、科类、批次、专业、层次、专业组代码
+        
+        **比对2（招生计划 vs 院校分）：** 检查招生计划的记录是否在院校分中存在
+        - 匹配字段：年份、省份、学校、科类、批次、专业组代码
+        """)
+    
+    # 文件上传区域
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.subheader("📋 招生计划文件")
+        plan_file = st.file_uploader("上传招生计划文件", type=["xlsx", "xls"], key="plan_file")
+        if plan_file is not None:
+            try:
+                plan_df = pd.read_excel(plan_file, engine='openpyxl')
+                st.session_state.plan_data = plan_df
+                st.success(f"✓ 文件加载成功\n文件名: {plan_file.name}\n记录数: {len(plan_df)} 条")
+            except Exception as e:
+                st.error(f"❌ 文件读取失败: {str(e)}")
+    
+    with col2:
+        st.subheader("📊 专业分文件")
+        score_file = st.file_uploader("上传专业分文件", type=["xlsx", "xls"], key="score_file")
+        if score_file is not None:
+            try:
+                score_df = pd.read_excel(score_file, engine='openpyxl')
+                st.session_state.score_data = score_df
+                st.success(f"✓ 文件加载成功\n文件名: {score_file.name}\n记录数: {len(score_df)} 条")
+            except Exception as e:
+                st.error(f"❌ 文件读取失败: {str(e)}")
+    
+    with col3:
+        st.subheader("🏫 院校分文件")
+        college_file = st.file_uploader("上传院校分文件", type=["xlsx", "xls"], key="college_file")
+        if college_file is not None:
+            try:
+                college_df = pd.read_excel(college_file, engine='openpyxl')
+                st.session_state.college_data = college_df
+                st.success(f"✓ 文件加载成功\n文件名: {college_file.name}\n记录数: {len(college_df)} 条")
+            except Exception as e:
+                st.error(f"❌ 文件读取失败: {str(e)}")
+    
+    st.markdown("---")
+    
+    # 比对按钮
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    with col1:
+        compare_plan_score_btn = st.button("比对1：招生计划 vs 专业分", type="primary", use_container_width=True)
+    with col2:
+        compare_plan_college_btn = st.button("比对2：招生计划 vs 院校分", type="primary", use_container_width=True)
+    with col3:
+        compare_all_btn = st.button("全部比对", type="primary", use_container_width=True)
+    with col4:
+        reset_btn = st.button("重置", use_container_width=True)
+    
+    # 执行比对
+    if compare_plan_score_btn:
+        if st.session_state.plan_data is None:
+            st.error("请先上传招生计划文件")
+        elif st.session_state.score_data is None:
+            st.error("请先上传专业分文件")
+        else:
+            with st.spinner("正在比对数据..."):
+                st.session_state.plan_score_results = compare_plan_vs_score(
+                    st.session_state.plan_data, st.session_state.score_data
+                )
+            st.success("比对1完成！")
+            st.balloons()
+    
+    if compare_plan_college_btn:
+        if st.session_state.plan_data is None:
+            st.error("请先上传招生计划文件")
+        elif st.session_state.college_data is None:
+            st.error("请先上传院校分文件")
+        else:
+            with st.spinner("正在比对数据..."):
+                st.session_state.plan_college_results = compare_plan_vs_college(
+                    st.session_state.plan_data, st.session_state.college_data
+                )
+            st.success("比对2完成！")
+            st.balloons()
+    
+    if compare_all_btn:
+        comparisons = []
+        if st.session_state.plan_data is not None and st.session_state.score_data is not None:
+            comparisons.append("比对1")
+        if st.session_state.plan_data is not None and st.session_state.college_data is not None:
+            comparisons.append("比对2")
+        
+        if len(comparisons) == 0:
+            st.error("请至少上传两个文件以进行比对")
+        else:
+            with st.spinner("正在执行全部比对..."):
+                if "比对1" in comparisons:
+                    st.session_state.plan_score_results = compare_plan_vs_score(
+                        st.session_state.plan_data, st.session_state.score_data
+                    )
+                if "比对2" in comparisons:
+                    st.session_state.plan_college_results = compare_plan_vs_college(
+                        st.session_state.plan_data, st.session_state.college_data
+                    )
+            st.success("全部比对完成！")
+            st.balloons()
+    
+    if reset_btn:
+        st.session_state.plan_data = None
+        st.session_state.score_data = None
+        st.session_state.college_data = None
+        st.session_state.plan_score_results = []
+        st.session_state.plan_college_results = []
+        st.success("重置完成！")
+        st.rerun()
+    
+    # 显示比对结果
+    if len(st.session_state.plan_score_results) > 0 or len(st.session_state.plan_college_results) > 0:
+        st.markdown("---")
+        
+        # 创建标签页
+        tab_plan_score, tab_plan_college = st.tabs([
+            "比对1：招生计划 vs 专业分",
+            "比对2：招生计划 vs 院校分"
+        ])
+        
+        # 比对1结果
+        with tab_plan_score:
+            if len(st.session_state.plan_score_results) > 0:
+                results = st.session_state.plan_score_results
+                total = len(results)
+                matched = sum(1 for r in results if r['exists'])
+                unmatched = total - matched
+                rate = (matched / total * 100) if total > 0 else 0
+                
+                # 统计信息
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("总记录数", total)
+                with col2:
+                    st.metric("匹配记录数", matched, delta=f"{rate:.1f}%")
+                with col3:
+                    st.metric("未匹配记录数", unmatched)
+                with col4:
+                    st.metric("匹配率", f"{rate:.1f}%")
+                
+                # 筛选控件
+                st.markdown("### 筛选条件")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    provinces = sorted(set(r['keyFields']['省份'] for r in results if r['keyFields']['省份']))
+                    province_filter = st.selectbox("省份", ["全部"] + provinces, key="ps_province")
+                with col2:
+                    batches = sorted(set(r['keyFields']['批次'] for r in results if r['keyFields']['批次']))
+                    batch_filter = st.selectbox("批次", ["全部"] + batches, key="ps_batch")
+                with col3:
+                    match_status_filter = st.selectbox("匹配状态", ["全部", "匹配", "未匹配"], key="ps_status")
+                with col4:
+                    display_option = st.selectbox("显示选项", ["全部", "前100条", "前500条"], key="ps_display")
+                
+                # 应用筛选
+                filtered_results = results
+                if province_filter != "全部":
+                    filtered_results = [r for r in filtered_results if r['keyFields']['省份'] == province_filter]
+                if batch_filter != "全部":
+                    filtered_results = [r for r in filtered_results if r['keyFields']['批次'] == batch_filter]
+                if match_status_filter == "匹配":
+                    filtered_results = [r for r in filtered_results if r['exists']]
+                elif match_status_filter == "未匹配":
+                    filtered_results = [r for r in filtered_results if not r['exists']]
+                
+                display_count = len(filtered_results)
+                if display_option == "前100条":
+                    display_count = min(100, len(filtered_results))
+                elif display_option == "前500条":
+                    display_count = min(500, len(filtered_results))
+                
+                # 显示表格
+                st.markdown(f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
+                display_results = filtered_results[:display_count]
+                
+                if len(display_results) > 0:
+                    # 准备表格数据
+                    table_data = []
+                    for r in display_results:
+                        table_data.append({
+                            '序号': r['index'],
+                            '年份': r['keyFields']['年份'],
+                            '省份': r['keyFields']['省份'],
+                            '学校': r['keyFields']['学校'],
+                            '科类': r['keyFields']['科类'],
+                            '批次': r['keyFields']['批次'],
+                            '专业': r['keyFields']['专业'],
+                            '层次': r['keyFields']['层次'],
+                            '专业组代码': r['keyFields']['专业组代码'] or '-',
+                            '招生人数': r['otherInfo']['招生人数'] or '-',
+                            '匹配状态': '✓ 存在' if r['exists'] else '✗ 不存在'
+                        })
+                    
+                    df_display = pd.DataFrame(table_data)
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                
+                # 导出按钮
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("导出比对1结果", key="export_ps", use_container_width=True):
+                        try:
+                            export_data = []
+                            for r in results:
+                                export_data.append({
+                                    '序号': r['index'],
+                                    '年份': r['keyFields']['年份'],
+                                    '省份': r['keyFields']['省份'],
+                                    '学校': r['keyFields']['学校'],
+                                    '科类': r['keyFields']['科类'],
+                                    '批次': r['keyFields']['批次'],
+                                    '专业': r['keyFields']['专业'],
+                                    '层次': r['keyFields']['层次'],
+                                    '专业组代码': r['keyFields']['专业组代码'],
+                                    '招生人数': r['otherInfo']['招生人数'],
+                                    '学费': r['otherInfo']['学费'],
+                                    '学制': r['otherInfo']['学制'],
+                                    '专业代码': r['otherInfo']['专业代码'],
+                                    '匹配状态': '存在' if r['exists'] else '不存在',
+                                    '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
+                                })
+                            
+                            output = BytesIO()
+                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+                            
+                            output.seek(0)
+                            st.download_button(
+                                "📥 下载比对1结果",
+                                output,
+                                file_name=f"比对1_招生计划vs专业分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        except Exception as e:
+                            st.error(f"导出失败: {str(e)}")
+                
+                with col2:
+                    unmatched_results = [r for r in results if not r['exists']]
+                    if len(unmatched_results) > 0:
+                        if st.button("导出未匹配数据为专业分格式", key="export_ps_unmatched", use_container_width=True):
+                            try:
+                                # 提取原始数据
+                                conversion_data = []
+                                for r in unmatched_results:
+                                    original_idx = r['originalIndex']
+                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
+                                
+                                # 转换数据
+                                converted_data = convert_data(conversion_data)
+                                
+                                # 导出
+                                output = BytesIO()
+                                temp_path = "temp_converted.xlsx"
+                                export_converted_data_to_excel(converted_data, conversion_data, temp_path)
+                                
+                                with open(temp_path, 'rb') as f:
+                                    st.download_button(
+                                        "📥 下载转换后的专业分数据",
+                                        f.read(),
+                                        file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                
+                                os.remove(temp_path)
+                                st.success(f"转换完成！共转换 {len(converted_data)} 条数据")
+                            except Exception as e:
+                                st.error(f"转换失败: {str(e)}")
+            else:
+                st.info("暂无比对结果，请先执行比对")
+        
+        # 比对2结果
+        with tab_plan_college:
+            if len(st.session_state.plan_college_results) > 0:
+                results = st.session_state.plan_college_results
+                total = len(results)
+                matched = sum(1 for r in results if r['exists'])
+                unmatched = total - matched
+                rate = (matched / total * 100) if total > 0 else 0
+                
+                # 统计信息
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("总记录数", total)
+                with col2:
+                    st.metric("匹配记录数", matched, delta=f"{rate:.1f}%")
+                with col3:
+                    st.metric("未匹配记录数", unmatched)
+                with col4:
+                    st.metric("匹配率", f"{rate:.1f}%")
+                
+                # 筛选控件
+                st.markdown("### 筛选条件")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    provinces = sorted(set(r['keyFields']['省份'] for r in results if r['keyFields']['省份']))
+                    province_filter = st.selectbox("省份", ["全部"] + provinces, key="pc_province")
+                with col2:
+                    batches = sorted(set(r['keyFields']['批次'] for r in results if r['keyFields']['批次']))
+                    batch_filter = st.selectbox("批次", ["全部"] + batches, key="pc_batch")
+                with col3:
+                    match_status_filter = st.selectbox("匹配状态", ["全部", "匹配", "未匹配"], key="pc_status")
+                with col4:
+                    display_option = st.selectbox("显示选项", ["全部", "前100条", "前500条"], key="pc_display")
+                
+                # 应用筛选
+                filtered_results = results
+                if province_filter != "全部":
+                    filtered_results = [r for r in filtered_results if r['keyFields']['省份'] == province_filter]
+                if batch_filter != "全部":
+                    filtered_results = [r for r in filtered_results if r['keyFields']['批次'] == batch_filter]
+                if match_status_filter == "匹配":
+                    filtered_results = [r for r in filtered_results if r['exists']]
+                elif match_status_filter == "未匹配":
+                    filtered_results = [r for r in filtered_results if not r['exists']]
+                
+                display_count = len(filtered_results)
+                if display_option == "前100条":
+                    display_count = min(100, len(filtered_results))
+                elif display_option == "前500条":
+                    display_count = min(500, len(filtered_results))
+                
+                # 显示表格
+                st.markdown(f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
+                display_results = filtered_results[:display_count]
+                
+                if len(display_results) > 0:
+                    # 准备表格数据
+                    table_data = []
+                    for r in display_results:
+                        table_data.append({
+                            '序号': r['index'],
+                            '年份': r['keyFields']['年份'],
+                            '省份': r['keyFields']['省份'],
+                            '学校': r['keyFields']['学校'],
+                            '科类': r['keyFields']['科类'],
+                            '批次': r['keyFields']['批次'],
+                            '专业组代码': r['keyFields']['专业组代码'] or '-',
+                            '专业': r['otherInfo']['专业'] or '-',
+                            '匹配状态': '✓ 存在' if r['exists'] else '✗ 不存在'
+                        })
+                    
+                    df_display = pd.DataFrame(table_data)
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                
+                # 导出按钮
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("导出比对2结果", key="export_pc", use_container_width=True):
+                        try:
+                            export_data = []
+                            for r in results:
+                                export_data.append({
+                                    '序号': r['index'],
+                                    '年份': r['keyFields']['年份'],
+                                    '省份': r['keyFields']['省份'],
+                                    '学校': r['keyFields']['学校'],
+                                    '科类': r['keyFields']['科类'],
+                                    '批次': r['keyFields']['批次'],
+                                    '专业组代码': r['keyFields']['专业组代码'],
+                                    '专业': r['otherInfo']['专业'],
+                                    '层次': r['otherInfo']['层次'],
+                                    '招生人数': r['otherInfo']['招生人数'],
+                                    '匹配状态': '存在' if r['exists'] else '不存在',
+                                    '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
+                                })
+                            
+                            output = BytesIO()
+                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+                            
+                            output.seek(0)
+                            st.download_button(
+                                "📥 下载比对2结果",
+                                output,
+                                file_name=f"比对2_招生计划vs院校分_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                        except Exception as e:
+                            st.error(f"导出失败: {str(e)}")
+                
+                with col2:
+                    unmatched_results = [r for r in results if not r['exists']]
+                    if len(unmatched_results) > 0:
+                        if st.button("导出未匹配数据为专业分格式", key="export_pc_unmatched", use_container_width=True):
+                            try:
+                                # 提取原始数据
+                                conversion_data = []
+                                for r in unmatched_results:
+                                    original_idx = r['originalIndex']
+                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
+                                
+                                # 转换数据
+                                converted_data = convert_data(conversion_data)
+                                
+                                # 导出
+                                output = BytesIO()
+                                temp_path = "temp_converted.xlsx"
+                                export_converted_data_to_excel(converted_data, conversion_data, temp_path)
+                                
+                                with open(temp_path, 'rb') as f:
+                                    st.download_button(
+                                        "📥 下载转换后的专业分数据",
+                                        f.read(),
+                                        file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                
+                                os.remove(temp_path)
+                                st.success(f"转换完成！共转换 {len(converted_data)} 条数据")
+                            except Exception as e:
+                                st.error(f"转换失败: {str(e)}")
+            else:
+                st.info("暂无比对结果，请先执行比对")
+        
+        # 导出全部结果按钮
+        if len(st.session_state.plan_score_results) > 0 or len(st.session_state.plan_college_results) > 0:
+            st.markdown("---")
+            if st.button("📊 导出全部结果", use_container_width=True):
+                try:
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # 比对1结果
+                        if len(st.session_state.plan_score_results) > 0:
+                            export_data = []
+                            for r in st.session_state.plan_score_results:
+                                export_data.append({
+                                    '序号': r['index'],
+                                    '年份': r['keyFields']['年份'],
+                                    '省份': r['keyFields']['省份'],
+                                    '学校': r['keyFields']['学校'],
+                                    '科类': r['keyFields']['科类'],
+                                    '批次': r['keyFields']['批次'],
+                                    '专业': r['keyFields']['专业'],
+                                    '层次': r['keyFields']['层次'],
+                                    '专业组代码': r['keyFields']['专业组代码'],
+                                    '招生人数': r['otherInfo']['招生人数'],
+                                    '学费': r['otherInfo']['学费'],
+                                    '学制': r['otherInfo']['学制'],
+                                    '专业代码': r['otherInfo']['专业代码'],
+                                    '匹配状态': '存在' if r['exists'] else '不存在',
+                                    '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
+                                })
+                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+                        
+                        # 比对2结果
+                        if len(st.session_state.plan_college_results) > 0:
+                            export_data = []
+                            for r in st.session_state.plan_college_results:
+                                export_data.append({
+                                    '序号': r['index'],
+                                    '年份': r['keyFields']['年份'],
+                                    '省份': r['keyFields']['省份'],
+                                    '学校': r['keyFields']['学校'],
+                                    '科类': r['keyFields']['科类'],
+                                    '批次': r['keyFields']['批次'],
+                                    '专业组代码': r['keyFields']['专业组代码'],
+                                    '专业': r['otherInfo']['专业'],
+                                    '层次': r['otherInfo']['层次'],
+                                    '招生人数': r['otherInfo']['招生人数'],
+                                    '匹配状态': '存在' if r['exists'] else '不存在',
+                                    '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
+                                })
+                            pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+                        
+                        # 统计报告
+                        summary_data = {
+                            '比对类型': ['比对1：招生计划 vs 专业分', '比对2：招生计划 vs 院校分'],
+                            '总记录数': [
+                                len(st.session_state.plan_score_results),
+                                len(st.session_state.plan_college_results)
+                            ],
+                            '匹配记录数': [
+                                sum(1 for r in st.session_state.plan_score_results if r['exists']),
+                                sum(1 for r in st.session_state.plan_college_results if r['exists'])
+                            ],
+                            '匹配率': [
+                                f"{(sum(1 for r in st.session_state.plan_score_results if r['exists']) / len(st.session_state.plan_score_results) * 100):.1f}%" if len(st.session_state.plan_score_results) > 0 else "0%",
+                                f"{(sum(1 for r in st.session_state.plan_college_results if r['exists']) / len(st.session_state.plan_college_results) * 100):.1f}%" if len(st.session_state.plan_college_results) > 0 else "0%"
+                            ]
+                        }
+                        pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='统计报告')
+                    
+                    output.seek(0)
+                    st.download_button(
+                        "📥 下载全部结果",
+                        output,
+                        file_name=f"数据比对结果汇总_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.error(f"导出失败: {str(e)}")
 
 
 # 页脚
