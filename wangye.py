@@ -1041,7 +1041,7 @@ def images_to_pdf(image_paths, pdf_path):
 # Streamlit页面布局
 # ============================
 # 页面标题
-st.title("📊 数据处理工具")
+st.title("📊 数据处理工具——测试")
 st.markdown("---")
 
 # 功能说明
@@ -1875,7 +1875,7 @@ with tab7:
     
     with col1:
         st.subheader("📋 招生计划文件")
-        plan_file = st.file_uploader("上传招生计划文件", type=["xlsx", "xls"], key="plan_file")
+        plan_file = st.file_uploader("上传招生计划文件", type=["xlsx", "xls"], key="tab7_plan_file")
         if plan_file is not None:
             try:
                 plan_df = pd.read_excel(plan_file, engine='openpyxl')
@@ -1886,7 +1886,7 @@ with tab7:
     
     with col2:
         st.subheader("📊 专业分文件")
-        score_file = st.file_uploader("上传专业分文件", type=["xlsx", "xls"], key="score_file")
+        score_file = st.file_uploader("上传专业分文件", type=["xlsx", "xls"], key="tab7_score_file")
         if score_file is not None:
             try:
                 score_df = pd.read_excel(score_file, engine='openpyxl')
@@ -1897,7 +1897,7 @@ with tab7:
     
     with col3:
         st.subheader("🏫 院校分文件")
-        college_file = st.file_uploader("上传院校分文件", type=["xlsx", "xls"], key="college_file")
+        college_file = st.file_uploader("上传院校分文件", type=["xlsx", "xls"], key="tab7_college_file")
         if college_file is not None:
             try:
                 college_df = pd.read_excel(college_file, engine='openpyxl')
