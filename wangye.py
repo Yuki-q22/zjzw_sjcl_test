@@ -1033,154 +1033,6 @@ def images_to_pdf(image_paths, pdf_path):
         return True
     return False
 
-# =====================================================
-# 招生计划数据比对
-# =====================================================
-
-def _safe_str(value):
-    return "" if pd.isna(value) else str(value).strip()
-
-
-# ---------- Key 生成 ----------
-
-def build_plan_score_key(row: dict) -> str:
-    return "|".join([
-        _safe_str(row.get("年份")),
-        _safe_str(row.get("省份")),
-        _safe_str(row.get("学校")),
-        _safe_str(row.get("科类")),
-        _safe_str(row.get("批次")),
-        _safe_str(row.get("专业")),
-        _safe_str(row.get("层次")),
-        _safe_str(row.get("专业组代码")),
-    ])
-
-
-def build_plan_college_key(row: dict) -> str:
-    return "|".join([
-        _safe_str(row.get("年份")),
-        _safe_str(row.get("省份")),
-        _safe_str(row.get("学校")),
-        _safe_str(row.get("科类")),
-        _safe_str(row.get("批次")),
-        _safe_str(row.get("专业组代码")),
-    ])
-
-
-# ---------- 比对逻辑 ----------
-
-def match_plan_with_score(plan_df: pd.DataFrame, score_df: pd.DataFrame) -> pd.DataFrame:
-    score_keys = {
-        build_plan_score_key(row)
-        for _, row in score_df.iterrows()
-    }
-
-    records = []
-    for idx, row in plan_df.iterrows():
-        data = row.to_dict()
-        data["序号"] = idx + 1
-        data["是否匹配"] = build_plan_score_key(row) in score_keys
-        records.append(data)
-
-    return pd.DataFrame(records)
-
-
-def match_plan_with_college(plan_df: pd.DataFrame, college_df: pd.DataFrame) -> pd.DataFrame:
-    college_keys = {
-        build_plan_college_key(row)
-        for _, row in college_df.iterrows()
-    }
-
-    records = []
-    for idx, row in plan_df.iterrows():
-        data = row.to_dict()
-        data["序号"] = idx + 1
-        data["是否匹配"] = build_plan_college_key(row) in college_keys
-        records.append(data)
-
-    return pd.DataFrame(records)
-
-
-# ---------- 统计 ----------
-
-def calc_match_summary(df: pd.DataFrame) -> dict:
-    total = len(df)
-    matched = int(df["是否匹配"].sum())
-    unmatched = total - matched
-    rate = f"{matched / total * 100:.2f}%" if total else "0.00%"
-
-    return {
-        "total": total,
-        "matched": matched,
-        "unmatched": unmatched,
-        "rate": rate,
-    }
-
-
-# ---------- 筛选 ----------
-
-def filter_match_df(
-    df: pd.DataFrame,
-    province: str | None = None,
-    batch: str | None = None,
-    status: str = "all",
-    limit: int | None = None
-) -> pd.DataFrame:
-
-    result = df.copy()
-
-    if province and province != "全部省份":
-        result = result[result["省份"] == province]
-
-    if batch and batch != "全部批次":
-        result = result[result["批次"] == batch]
-
-    if status == "matched":
-        result = result[result["是否匹配"] == True]
-    elif status == "unmatched":
-        result = result[result["是否匹配"] == False]
-
-    if limit:
-        result = result.head(limit)
-
-    return result.reset_index(drop=True)
-
-
-# ---------- 未匹配 → 专业分格式 ----------
-
-def transform_unmatched_to_score(df: pd.DataFrame) -> pd.DataFrame:
-    unmatched = df[df["是否匹配"] == False].copy()
-
-    def parse_rule(text):
-        if not isinstance(text, str) or not text.strip():
-            return "", ""
-
-        if "不限" in text:
-            return "不限科目专业组", ""
-
-        if "必选" in text:
-            clean = text.replace("必选", "").strip()
-            return "单科、多科均需选考", clean[:1]
-
-        return "", ""
-
-    unmatched[["选科要求说明", "次选科目"]] = unmatched.apply(
-        lambda r: pd.Series(parse_rule(r.get("专业组选科要求", ""))),
-        axis=1
-    )
-
-    return unmatched.reset_index(drop=True)
-
-
-# ---------- 导出 ----------
-
-def dataframe_to_excel_bytes(df: pd.DataFrame) -> BytesIO:
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
-    buffer.seek(0)
-    return buffer
-
 
 
 
@@ -1590,26 +1442,22 @@ with tab6:
 
 
 # ====================== tab7：招生计划工具======================
-with tab7: 
-    st.header("招生计划数据比对")
+with tab7:  # 假设您在原有基础上增加了一个 tab
+    st.header("招生计划数据比对与转换工具")
 
-plan_file = st.file_uploader("上传招生计划", type=["xlsx"])
-score_file = st.file_uploader("上传专业分", type=["xlsx"])
+    # 获取 HTML 文件的路径
+    html_file_path = resource_path("264437b0-a2dc-4d9e-acfb-1f3509057ec1.html")
 
-if plan_file and score_file:
-    plan_df = pd.read_excel(plan_file)
-    score_df = pd.read_excel(score_file)
+    try:
+        with open(html_file_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
 
-    result_df = match_plan_with_score(plan_df, score_df)
-    summary = calc_match_summary(result_df)
+        # 使用 components.html 渲染，设置足够的高度
+        # scrolling=True 允许组件内部滚动
+        components.html(html_content, height=800, scrolling=True)
 
-    st.metric("总条数", summary["total"])
-    st.metric("匹配率", summary["rate"])
-
-    st.dataframe(result_df)
-
-    excel = dataframe_to_excel_bytes(result_df)
-    st.download_button("导出结果", excel, "比对结果.xlsx")
+    except FileNotFoundError:
+        st.error("找不到 HTML 工具文件，请确保文件已上传并路径正确。")
 
 
 # 页脚
