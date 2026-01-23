@@ -25,7 +25,7 @@ import io
 # ============================
 # 设置页面配置
 st.set_page_config(
-    page_title="数据处理工具",
+    page_title="数据处理工具——测试",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1041,7 +1041,7 @@ def images_to_pdf(image_paths, pdf_path):
 # Streamlit页面布局
 # ============================
 # 页面标题
-st.title("📊 数据处理工具")
+st.title("📊 数据处理工具——测试")
 st.markdown("---")
 
 # 功能说明
