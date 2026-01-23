@@ -1033,55 +1033,6 @@ def images_to_pdf(image_paths, pdf_path):
         return True
     return False
 
-def process_data_comparison(plan_df, compare_df, mode="score"):
-    """
-    mode="score": 招生计划 vs 专业分
-    mode="college": 招生计划 vs 院校分
-    """
-    # 1. 统一转换为字符串并去除空格
-    for df in [plan_df, compare_df]:
-        for col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-
-    # 2. 定义匹配键
-    if mode == "score":
-        keys = ['年份', '省份', '学校', '科类', '批次', '专业', '层次', '专业组代码']
-    else:
-        keys = ['年份', '省份', '学校', '科类', '批次', '专业组代码']
-
-    # 3. 执行比对 (左连接)
-    # 给比较表加一个标记列
-    compare_df['__exists__'] = 'YES'
-    
-    # 合并
-    merged = pd.merge(plan_df, compare_df[keys + ['__exists__']], on=keys, how='left')
-    
-    # 标记结果
-    merged['匹配状态'] = merged['__exists__'].apply(lambda x: '匹配' if x == 'YES' else '未匹配')
-    return merged.drop(columns=['__exists__'])
-
-def convert_to_score_format(unmatched_df):
-    """将未匹配的招生计划转换为专业分模板格式"""
-    # 模拟 HTML 中的 JavaScript 转换逻辑
-    result_df = pd.DataFrame()
-    
-    # 映射基本字段
-    result_df['年份'] = unmatched_df['年份']
-    result_df['省份'] = unmatched_df['省份']
-    result_df['学校'] = unmatched_df['学校']
-    result_df['专业组名称'] = unmatched_df['专业组代码'] # 示例映射
-    result_df['专业'] = unmatched_df['专业']
-    
-    # 特别处理选科要求 (对应 HTML 中的逻辑)
-    def handle_requirement(req):
-        if "必选" in str(req):
-            return "单科、多科均需选考"
-        return "不限"
-        
-    if '专业组选科要求' in unmatched_df.columns:
-        result_df['选科要求'] = unmatched_df['专业组选科要求'].apply(handle_requirement)
-        
-    return result_df
 
 
 
@@ -1491,43 +1442,22 @@ with tab6:
 
 
 # ====================== tab7：招生计划工具======================
-with tab7:
-    st.header("招生计划数据比对与转换工具 (Python 原生版)")
+with tab7:  # 假设您在原有基础上增加了一个 tab
+    st.header("招生计划数据比对与转换工具")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        plan_file = st.file_uploader("📋 上传招生计划文件", type=["xlsx"])
-    with col2:
-        score_file = st.file_uploader("📊 上传专业分文件", type=["xlsx"])
-    with col3:
-        college_file = st.file_uploader("🏫 上传院校分文件", type=["xlsx"])
+    # 获取 HTML 文件的路径
+    html_file_path = resource_path("264437b0-a2dc-4d9e-acfb-1f3509057ec1.html")
 
-    if plan_file and (score_file or college_file):
-        df_plan = pd.read_excel(plan_file)
-        
-        if st.button("🚀 执行全量比对"):
-            # 执行比对逻辑
-            if score_file:
-                df_score = pd.read_excel(score_file)
-                res_score = process_data_comparison(df_plan, df_score, "score")
-                
-                # 显示统计
-                matched_count = len(res_score[res_score['匹配状态'] == '匹配'])
-                st.success(f"比对1完成：匹配 {matched_count} 条，未匹配 {len(res_score)-matched_count} 条")
-                
-                # 转换未匹配数据
-                unmatched = res_score[res_score['匹配状态'] == '未匹配']
-                if not unmatched.empty:
-                    df_converted = convert_to_score_format(unmatched)
-                    st.download_button(
-                        "📥 下载未匹配转换后的专业分文件",
-                        df_converted.to_csv(index=False).encode('utf-8-sig'),
-                        "unmatched_converted.csv",
-                        "text/csv"
-                    )
-                
-                # 预览结果
-                st.dataframe(res_score.head(100))
+    try:
+        with open(html_file_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+
+        # 使用 components.html 渲染，设置足够的高度
+        # scrolling=True 允许组件内部滚动
+        components.html(html_content, height=800, scrolling=True)
+
+    except FileNotFoundError:
+        st.error("找不到 HTML 工具文件，请确保文件已上传并路径正确。")
 
 
 # 页脚
