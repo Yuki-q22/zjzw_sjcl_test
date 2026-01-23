@@ -1749,6 +1749,166 @@ def convert_data(source_data):
     
     return converted
 
+def convert_to_college_score_format(conversion_data):
+    """将招生计划数据转换为院校分格式"""
+    if not conversion_data:
+        return []
+    
+    # 构建分组键：省份、学校、科类、批次、招生类型、层次、专业组代码
+    # 如果专业组代码为空，则不包含在分组键中
+    def get_group_key(item):
+        province = str(item.get('省份', '') or '').strip()
+        school = str(item.get('学校', '') or '').strip()
+        subject = str(item.get('科类', '') or '').strip()
+        batch = str(item.get('批次', '') or '').strip()
+        recruit_type = str(item.get('招生类型', '') or '').strip()
+        level = str(item.get('层次', '') or '').strip()
+        group_code = str(item.get('专业组代码', '') or '').strip()
+        
+        # 如果专业组代码为空或只有^，则不包含在分组键中
+        if not group_code or group_code == '^' or group_code == '':
+            return (province, school, subject, batch, recruit_type, level)
+        else:
+            return (province, school, subject, batch, recruit_type, level, group_code)
+    
+    # 按分组键分组
+    grouped_data = {}
+    for item in conversion_data:
+        key = get_group_key(item)
+        if key not in grouped_data:
+            grouped_data[key] = []
+        grouped_data[key].append(item)
+    
+    # 转换为院校分格式
+    college_score_data = []
+    for key, items in grouped_data.items():
+        # 取第一条记录作为基础数据
+        base_item = items[0]
+        
+        # 计算招生人数总和
+        total_recruit_num = 0
+        for item in items:
+            recruit_num = item.get('招生人数', '') or ''
+            if recruit_num:
+                try:
+                    total_recruit_num += float(str(recruit_num))
+                except:
+                    pass
+        
+        # 处理专业组代码：如果为空或只有^，则设为空字符串
+        group_code = str(base_item.get('专业组代码', '') or '').strip().lstrip('^')
+        if not group_code or group_code == '^':
+            group_code = ''
+        
+        # 处理院校招生代码：去除开头的^符号
+        recruit_code = str(base_item.get('招生代码', '') or '').strip().lstrip('^')
+        
+        # 处理招生人数：保持为字符串格式（文本格式）
+        recruit_num_str = str(int(total_recruit_num)) if total_recruit_num > 0 else ''
+        
+        # 构建院校分记录
+        college_record = {
+            '学校名称': str(base_item.get('学校', '') or '').strip(),
+            '省份': str(base_item.get('省份', '') or '').strip(),
+            '招生类别': str(base_item.get('科类', '') or '').strip(),
+            '招生批次': str(base_item.get('批次', '') or '').strip(),
+            '招生类型': str(base_item.get('招生类型', '') or '').strip(),
+            '选测等级': '',
+            '最高分': '',
+            '最低分': '',
+            '平均分': '',
+            '最高位次': '',
+            '最低位次': '',
+            '平均位次': '',
+            '录取人数': '',
+            '招生人数': recruit_num_str,
+            '数据来源': str(base_item.get('数据来源', '') or '').strip(),
+            '省控线科类': '',
+            '省控线批次': '',
+            '省控线备注': '',
+            '专业组代码': group_code,
+            '首选科目': '',
+            '院校招生代码': recruit_code
+        }
+        
+        # 处理首选科目：只有招生类别为物理类/历史类时才填入
+        category = college_record['招生类别']
+        if '物理类' in category or category == '物理':
+            college_record['首选科目'] = '物理'
+        elif '历史类' in category or category == '历史':
+            college_record['首选科目'] = '历史'
+        
+        college_score_data.append(college_record)
+    
+    return college_score_data
+
+def export_college_score_data_to_excel(college_score_data, conversion_data, output_path):
+    """导出院校分格式的Excel文件"""
+    # 创建备注文本
+    remark_text = """备注：请删除示例后再填写；
+1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
+2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
+3.批次：（以下为19年使用批次）
+    北京、天津、辽宁、上海、山东、广东、海南限定本科提前批、本科批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
+    浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
+4.最高分、最低分、平均分：仅能填写数字（最多保留2位小数），且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
+5.最低分位次：仅能填写数字
+6.录取人数：仅能填写数字
+7.首选科目：新八省必填，只能填写（历史或物理）"""
+    
+    # 创建工作簿
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    
+    # 第一行：合并A1-U1并写入备注
+    ws.merge_cells('A1:U1')
+    ws['A1'] = remark_text
+    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
+    # 设置第一行行高为220磅
+    ws.row_dimensions[1].height = 220
+    
+    # 第二行：A2="招生年"，B2=年份，C2="1"，D2="模板类型（模板标识不要更改）"
+    ws['A2'] = '招生年'
+    # 从conversion_data中提取年份
+    year_value = ''
+    if conversion_data and len(conversion_data) > 0:
+        year_value = conversion_data[0].get('年份', '') or ''
+        if year_value:
+            year_value = str(year_value).strip()
+    
+    # B2设置为文本格式
+    ws['B2'] = year_value
+    ws['B2'].number_format = numbers.FORMAT_TEXT
+    ws['C2'] = 1
+    ws['D2'] = '模板类型（模板标识不要更改）'
+    
+    # 第三行：标题行
+    headers = ['学校名称', '省份', '招生类别', '招生批次', '招生类型', '选测等级', 
+              '最高分', '最低分', '平均分', '最高位次', '最低位次', '平均位次', 
+              '录取人数', '招生人数', '数据来源', '省控线科类', '省控线批次', '省控线备注', 
+              '专业组代码', '首选科目', '院校招生代码']
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=3, column=col_idx, value=header)
+    
+    # 数据行（从第4行开始）
+    for row_idx, row_data in enumerate(college_score_data, start=4):
+        for col_idx, header in enumerate(headers, start=1):
+            value = row_data.get(header, '')
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            
+            # 设置文本格式的列：招生人数、专业组代码、院校招生代码
+            # 这些列需要保持文本格式，即使内容开头为0也不能抹掉
+            if header == '专业组代码' or header == '院校招生代码' or header == '招生人数':
+                # 确保值为字符串格式，并设置为文本格式
+                if value is not None and value != '':
+                    cell.value = str(value)
+                cell.number_format = numbers.FORMAT_TEXT
+    
+    wb.save(output_path)
+
 def export_converted_data_to_excel(data, conversion_data, output_path):
     """导出转换后的数据为Excel（保持与HTML中相同的格式）"""
     from datetime import datetime
@@ -1781,7 +1941,7 @@ def export_converted_data_to_excel(data, conversion_data, output_path):
     ws.merge_cells('A1:Y1')
     ws['A1'] = remark_text
     ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[1].height = 350
+    ws.row_dimensions[1].height = 220
     
     # 第2行：招生年份
     admission_year = ''
@@ -2224,8 +2384,8 @@ with tab7:
             if len(st.session_state.plan_college_results) > 0:
                 all_unmatched_results.extend([r for r in st.session_state.plan_college_results if not r['exists']])
             
-            # 使用两列布局，突出显示"导出未匹配数据为专业分格式"
-            col1, col2 = st.columns([1, 1])
+            # 使用三列布局，添加院校分格式导出
+            col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
                 if st.button("📊 导出全部结果", use_container_width=True):
@@ -2334,6 +2494,41 @@ with tab7:
                             
                             os.remove(temp_path)
                             st.success(f"转换完成！共转换 {len(converted_data)} 条数据（已去重）")
+                        except Exception as e:
+                            st.error(f"转换失败: {str(e)}")
+                else:
+                    st.info("暂无未匹配数据")
+            
+            with col3:
+                if len(all_unmatched_results) > 0:
+                    if st.button("⭐ 导出未匹配数据为院校分格式", type="primary", use_container_width=True):
+                        try:
+                            # 提取原始数据（去重，因为同一个记录可能在比对1和比对2中都未匹配）
+                            seen_indices = set()
+                            conversion_data = []
+                            for r in all_unmatched_results:
+                                original_idx = r['originalIndex']
+                                if original_idx not in seen_indices:
+                                    seen_indices.add(original_idx)
+                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
+                            
+                            # 转换数据为院校分格式
+                            college_score_data = convert_to_college_score_format(conversion_data)
+                            
+                            # 导出
+                            temp_path = "temp_college_score.xlsx"
+                            export_college_score_data_to_excel(college_score_data, conversion_data, temp_path)
+                            
+                            with open(temp_path, 'rb') as f:
+                                st.download_button(
+                                    "📥 下载转换后的院校分数据",
+                                    f.read(),
+                                    file_name=f"院校分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                            
+                            os.remove(temp_path)
+                            st.success(f"转换完成！共转换 {len(college_score_data)} 条数据（已去重并分组）")
                         except Exception as e:
                             st.error(f"转换失败: {str(e)}")
                 else:
