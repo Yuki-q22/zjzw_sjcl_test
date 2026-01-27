@@ -1075,6 +1075,658 @@ def images_to_pdf(image_paths, pdf_path):
 
 
 # ============================
+# 招生计划数据比对与转换工具相关函数
+# ============================
+
+def generate_plan_score_key(item):
+    """生成招生计划 vs 专业分的组合键"""
+    year = str(item.get('年份', '') or '').strip()
+    province = str(item.get('省份', '') or '').strip()
+    school = str(item.get('学校', '') or '').strip()
+    subject = str(item.get('科类', '') or '').strip()
+    batch = str(item.get('批次', '') or '').strip()
+    major = str(item.get('专业', '') or '').strip()
+    level = str(item.get('层次', '') or '').strip()
+    group_code = str(item.get('专业组代码', '') or '').strip()
+    return f"{year}|{province}|{school}|{subject}|{batch}|{major}|{level}|{group_code}"
+
+
+def generate_plan_college_key(item):
+    """生成招生计划 vs 院校分的组合键"""
+    year = str(item.get('年份', '') or '').strip()
+    province = str(item.get('省份', '') or '').strip()
+    school = str(item.get('学校', '') or '').strip()
+    subject = str(item.get('科类', '') or '').strip()
+    batch = str(item.get('批次', '') or '').strip()
+    group_code = str(item.get('专业组代码', '') or '').strip()
+    return f"{year}|{province}|{school}|{subject}|{batch}|{group_code}"
+
+
+def compare_plan_vs_score(plan_df, score_df):
+    """比对招生计划 vs 专业分"""
+    plan_score_results = []
+    score_key_set = set()
+
+    # 为专业分数据建立索引
+    for _, item in score_df.iterrows():
+        key = generate_plan_score_key(item.to_dict())
+        score_key_set.add(key)
+
+    # 比对招生计划数据
+    for idx, row in plan_df.iterrows():
+        item = row.to_dict()
+        key = generate_plan_score_key(item)
+        exists = key in score_key_set
+
+        plan_score_results.append({
+            'index': idx + 1,
+            'originalIndex': idx,
+            'keyFields': {
+                '年份': item.get('年份', '') or '',
+                '省份': item.get('省份', '') or '',
+                '学校': item.get('学校', '') or '',
+                '科类': item.get('科类', '') or '',
+                '批次': item.get('批次', '') or '',
+                '专业': item.get('专业', '') or '',
+                '层次': item.get('层次', '') or '',
+                '专业组代码': item.get('专业组代码', '') or ''
+            },
+            'exists': exists,
+            'otherInfo': {
+                '招生人数': item.get('招生人数', '') or '',
+                '学费': item.get('学费', '') or '',
+                '学制': item.get('学制', '') or '',
+                '专业代码': item.get('专业代码', '') or '',
+                '招生代码': item.get('招生代码', '') or '',
+                '数据来源': item.get('数据来源', '') or '',
+                '备注': item.get('备注', '') or '',
+                '招生类型': item.get('招生类型', '') or '',
+                '专业组选科要求': item.get('专业组选科要求', '') or '',
+                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
+            }
+        })
+
+    return plan_score_results
+
+
+def compare_plan_vs_college(plan_df, college_df):
+    """比对招生计划 vs 院校分"""
+    plan_college_results = []
+    college_key_set = set()
+
+    # 为院校分数据建立索引
+    for _, item in college_df.iterrows():
+        key = generate_plan_college_key(item.to_dict())
+        college_key_set.add(key)
+
+    # 比对招生计划数据
+    for idx, row in plan_df.iterrows():
+        item = row.to_dict()
+        key = generate_plan_college_key(item)
+        exists = key in college_key_set
+
+        plan_college_results.append({
+            'index': idx + 1,
+            'originalIndex': idx,
+            'keyFields': {
+                '年份': item.get('年份', '') or '',
+                '省份': item.get('省份', '') or '',
+                '学校': item.get('学校', '') or '',
+                '科类': item.get('科类', '') or '',
+                '批次': item.get('批次', '') or '',
+                '专业组代码': item.get('专业组代码', '') or ''
+            },
+            'exists': exists,
+            'otherInfo': {
+                '专业': item.get('专业', '') or '',
+                '层次': item.get('层次', '') or '',
+                '招生人数': item.get('招生人数', '') or '',
+                '学费': item.get('学费', '') or '',
+                '学制': item.get('学制', '') or '',
+                '专业代码': item.get('专业代码', '') or '',
+                '招生代码': item.get('招生代码', '') or '',
+                '数据来源': item.get('数据来源', '') or '',
+                '备注': item.get('备注', '') or '',
+                '招生类型': item.get('招生类型', '') or '',
+                '专业组选科要求': item.get('专业组选科要求', '') or '',
+                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
+            }
+        })
+
+    return plan_college_results
+
+
+def get_first_subject(category):
+    """获取首选科目：根据招生科类的第一个字"""
+    if not category:
+        return ''
+    category_str = str(category)
+    if '物理类' in category_str or '物理' in category_str:
+        return '物'
+    elif '历史类' in category_str or '历史' in category_str:
+        return '历'
+    return ''
+
+
+def convert_level(level):
+    """转换层次字段"""
+    if not level:
+        return ''
+    level_str = str(level).lower()
+    if '专科' in level_str or '高职' in level_str:
+        return '专科(高职)'
+    elif '本科' in level_str:
+        return '本科(普通)'
+    return level
+
+
+def extract_required_subjects(text):
+    """提取必选科目（处理"物化生（3科必选）"格式）"""
+    if not text:
+        return []
+
+    subjects = []
+    subject_map = {
+        '物理': '物', '化学': '化', '生物': '生', '历史': '历',
+        '地理': '地', '政治': '政', '技术': '技'
+    }
+
+    # 清理文本，保留中文和顿号、逗号
+    import re
+    clean_text = re.sub(r'[^\u4e00-\u9fa5、，,]', '', str(text)).strip()
+
+    # 处理"物化生（3科必选）"格式：直接提取括号前的内容
+    if '必选' in text and '（' in text and text.index('必选') > text.index('（'):
+        before_bracket = text.split('（')[0]
+        clean_text = before_bracket
+
+    # 处理"物、化、生（3科必选）"格式：顿号分隔的科目
+    if '、' in clean_text or '，' in clean_text or ',' in clean_text:
+        normalized_text = re.sub(r'[、，]', ',', clean_text)
+        parts = [p.strip() for p in normalized_text.split(',') if p.strip()]
+        for part in parts:
+            for full_name, short_name in subject_map.items():
+                if full_name in part or part in full_name:
+                    if short_name not in subjects:
+                        subjects.append(short_name)
+                    break
+    else:
+        # 处理"物化生"这样的连续字符串
+        for full_name, short_name in subject_map.items():
+            if full_name in clean_text:
+                if short_name not in subjects:
+                    subjects.append(short_name)
+
+        # 如果没匹配到全名，尝试按字符匹配
+        if len(subjects) == 0 and len(clean_text) > 0:
+            char_to_short_map = {
+                '物': '物', '化': '化', '生': '生', '历': '历',
+                '地': '地', '政': '政', '技': '技'
+            }
+            for char in clean_text:
+                if char in char_to_short_map and char_to_short_map[char] not in subjects:
+                    subjects.append(char_to_short_map[char])
+
+    return subjects
+
+
+def extract_required_subjects_with_format(text):
+    """提取必选科目（去掉所有标点符号）
+    处理格式如：物化生（3科必选）、物、化、生（3科必选）、生、化、物（3科必选）、物化生(3科必选)等
+    返回时去掉所有标点符号，只保留科目字符
+    """
+    if not text:
+        return ''
+    
+    import re
+    
+    # 处理"物化生（3科必选）"或"物、化、生（3科必选）"或"生、化、物（3科必选）"格式
+    # 支持中文括号（、）和英文括号()
+    extracted_text = ''
+    
+    if '必选' in text:
+        # 查找所有可能的括号位置
+        bracket_patterns = [
+            (r'（', r'）'),  # 中文括号
+            (r'\(', r'\)'),  # 英文括号
+        ]
+        
+        for left_bracket, right_bracket in bracket_patterns:
+            # 查找左括号位置
+            left_match = re.search(left_bracket, text)
+            if left_match:
+                left_pos = left_match.start()
+                # 提取括号前的内容
+                before_bracket = text[:left_pos].strip()
+                if before_bracket:
+                    extracted_text = before_bracket
+                    break
+        
+        # 如果没有找到括号，但包含"3科必选"等字样，尝试提取前面的内容
+        # 例如："物化生3科必选"或"物、化、生3科必选"
+        if not extracted_text and ('3科必选' in text or '三科必选' in text):
+            # 找到"必选"的位置
+            bi_xuan_pos = text.find('必选')
+            if bi_xuan_pos > 0:
+                before_bi_xuan = text[:bi_xuan_pos].strip()
+                # 移除可能的数字和"科"字
+                before_bi_xuan = re.sub(r'\d+科', '', before_bi_xuan).strip()
+                if before_bi_xuan:
+                    extracted_text = before_bi_xuan
+        
+        # 去掉所有标点符号（顿号、逗号、空格等），只保留科目字符
+        if extracted_text:
+            # 只保留科目字符：物、化、生、历、地、政、技等
+            subject_chars = ['物', '化', '生', '历', '地', '政', '技']
+            cleaned_text = ''.join([char for char in extracted_text if char in subject_chars])
+            return cleaned_text
+    
+    return ''
+
+
+def convert_selection_requirement(group_requirement, major_requirement):
+    """转换选科要求"""
+    selection_requirement = ''
+    second_subject = ''
+
+    # 合并两个要求字段（专业组选科要求和专业选科要求）
+    group_req_str = str(group_requirement).strip() if group_requirement else ''
+    major_req_str = str(major_requirement).strip() if major_requirement else ''
+    
+    # 如果两个字段都有内容，用顿号连接
+    if group_req_str and major_req_str:
+        requirement = group_req_str + '、' + major_req_str
+    else:
+        requirement = group_req_str + major_req_str
+
+    # 清理特殊字符
+    import re
+    requirement = re.sub(r'^\^+', '', requirement).replace('^', '、').strip()
+
+    if not requirement or requirement == '' or requirement == '、':
+        return selection_requirement, second_subject
+
+    # 根据附件2示例处理各种情况
+    if '不限' in requirement or '再选不限' in requirement:
+        selection_requirement = '不限科目专业组'
+    elif '必选' in requirement:
+        # 对于"3科必选"的情况，提取科目并去掉标点符号
+        original_format = extract_required_subjects_with_format(requirement)
+        required_subjects = []
+        
+        if original_format:
+            selection_requirement = '单科、多科均需选考'
+            second_subject = original_format
+        else:
+            # 其他必选情况，使用原有逻辑
+            required_subjects = extract_required_subjects(requirement)
+            if len(required_subjects) > 0:
+                selection_requirement = '单科、多科均需选考'
+                second_subject = ''.join(required_subjects)
+
+        # 特殊处理：如果包含"首选"，可能需要排除首选科目
+        if '首选' in requirement:
+            preferred_subjects = []
+            if '首选物理' in requirement:
+                preferred_subjects.append('物')
+            if '首选历史' in requirement:
+                preferred_subjects.append('历')
+            
+            # 如果已经提取了格式（已去掉标点符号），需要从中排除首选科目
+            if original_format:
+                # 从已去掉标点的字符串中移除首选科目字符
+                filtered_format = original_format
+                for pref_subj in preferred_subjects:
+                    filtered_format = filtered_format.replace(pref_subj, '')
+                if filtered_format:
+                    second_subject = filtered_format
+            elif required_subjects:
+                filtered_subjects = [s for s in required_subjects if s not in preferred_subjects]
+                if len(filtered_subjects) > 0:
+                    second_subject = ''.join(filtered_subjects)
+    elif '首选' in requirement and '再选' in requirement:
+        re_select_part = requirement.split('再选')[1] if '再选' in requirement else ''
+        re_select_subjects = extract_required_subjects(re_select_part)
+        if len(re_select_subjects) > 0:
+            selection_requirement = '单科、多科均需选考'
+            second_subject = ''.join(re_select_subjects)
+    elif '或' in requirement or '选1' in requirement:
+        subjects = extract_required_subjects(requirement)
+        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
+        if len(filtered_subjects) > 0:
+            selection_requirement = '多门选考'
+            second_subject = ''.join(filtered_subjects)
+    else:
+        subjects = extract_required_subjects(requirement)
+        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
+        second_subject = ''.join(filtered_subjects)
+        if len(filtered_subjects) > 0:
+            selection_requirement = '单科、多科均需选考'
+
+    return selection_requirement, second_subject
+
+
+def convert_to_text(value):
+    """转换为文本格式"""
+    if not value and value != 0:
+        return ''
+    text = str(value).lstrip('^').strip()
+    if text == '':
+        return ''
+    text = text.lstrip("'")
+    return text
+
+
+def convert_data(source_data):
+    """转换数据主函数"""
+    converted = []
+
+    for row in source_data:
+        new_row = {}
+
+        # 基础字段映射
+        new_row['学校名称'] = row.get('学校', '') or ''
+        new_row['省份'] = row.get('省份', '') or ''
+        new_row['招生专业'] = row.get('专业', '') or ''
+        new_row['招生科类'] = row.get('科类', '') or ''
+        new_row['招生批次'] = row.get('批次', '') or ''
+        new_row['招生类型（选填）'] = row.get('招生类型', '') or ''
+        new_row['专业备注（选填）'] = row.get('备注', '') or ''
+        new_row['招生人数（选填）'] = row.get('招生人数', '') or ''
+        new_row['数据来源'] = row.get('数据来源', '') or ''
+
+        # 处理层次字段
+        new_row['一级层次'] = convert_level(row.get('层次', ''))
+
+        # 处理代码字段（保持文本格式）
+        new_row['招生代码'] = convert_to_text(row.get('招生代码', ''))
+        new_row['专业代码'] = convert_to_text(row.get('专业代码', ''))
+        new_row['专业组代码'] = convert_to_text(row.get('专业组代码', ''))
+
+        # 处理首选科目
+        new_row['首选科目'] = get_first_subject(row.get('科类', ''))
+
+        # 处理选科要求
+        selection_requirement, second_subject = convert_selection_requirement(
+            row.get('专业组选科要求', ''),
+            row.get('专业选科要求(新高考专业省份)', '')
+        )
+        new_row['选科要求'] = selection_requirement
+        new_row['次选科目'] = second_subject
+
+        # 其他字段（留空）
+        new_row['专业方向（选填）'] = ''
+        new_row['最高分'] = ''
+        new_row['最低分'] = ''
+        new_row['平均分'] = ''
+        new_row['最低分位次（选填）'] = ''
+        new_row['最低分数区间低'] = ''
+        new_row['最低分数区间高'] = ''
+        new_row['最低分数区间位次低'] = ''
+        new_row['最低分数区间位次高'] = ''
+        new_row['录取人数（选填）'] = ''
+
+        converted.append(new_row)
+
+    return converted
+
+
+def convert_to_college_score_format(conversion_data):
+    """将招生计划数据转换为院校分格式"""
+    if not conversion_data:
+        return []
+
+    # 辅助函数：安全地处理空值，将None、NaN等转换为空字符串
+    def safe_str(value, default=''):
+        """安全地将值转换为字符串，处理None、NaN等情况"""
+        if value is None:
+            return default
+        if pd.isna(value):
+            return default
+        value_str = str(value).strip()
+        # 检查是否为'nan'、'None'等字符串
+        if value_str.lower() in ['nan', 'none', '']:
+            return default
+        return value_str
+
+    # 构建分组键：省份、学校、科类、批次、招生类型、层次、专业组代码
+    # 如果专业组代码为空，则不包含在分组键中
+    def get_group_key(item):
+        province = safe_str(item.get('省份', ''))
+        school = safe_str(item.get('学校', ''))
+        subject = safe_str(item.get('科类', ''))
+        batch = safe_str(item.get('批次', ''))
+        recruit_type = safe_str(item.get('招生类型', ''))
+        level = safe_str(item.get('层次', ''))
+        group_code = safe_str(item.get('专业组代码', ''))
+
+        # 如果专业组代码为空或只有^，则不包含在分组键中
+        if not group_code or group_code == '^' or group_code == '':
+            return (province, school, subject, batch, recruit_type, level)
+        else:
+            return (province, school, subject, batch, recruit_type, level, group_code)
+
+    # 按分组键分组
+    grouped_data = {}
+    for item in conversion_data:
+        key = get_group_key(item)
+        if key not in grouped_data:
+            grouped_data[key] = []
+        grouped_data[key].append(item)
+
+    # 转换为院校分格式
+    college_score_data = []
+    for key, items in grouped_data.items():
+        # 取第一条记录作为基础数据
+        base_item = items[0]
+
+        # 计算招生人数总和
+        total_recruit_num = 0
+        for item in items:
+            recruit_num = item.get('招生人数', '') or ''
+            if recruit_num and not pd.isna(recruit_num):
+                try:
+                    total_recruit_num += float(str(recruit_num))
+                except:
+                    pass
+
+        # 处理专业组代码：如果为空或只有^，则设为空字符串
+        group_code = safe_str(base_item.get('专业组代码', '')).lstrip('^')
+        if not group_code or group_code == '^':
+            group_code = ''
+
+        # 处理院校招生代码：去除开头的^符号
+        recruit_code = safe_str(base_item.get('招生代码', '')).lstrip('^')
+
+        # 处理招生人数：保持为字符串格式（文本格式）
+        recruit_num_str = str(int(total_recruit_num)) if total_recruit_num > 0 else ''
+
+        # 构建院校分记录
+        college_record = {
+            '学校名称': safe_str(base_item.get('学校', '')),
+            '省份': safe_str(base_item.get('省份', '')),
+            '招生类别': safe_str(base_item.get('科类', '')),
+            '招生批次': safe_str(base_item.get('批次', '')),
+            '招生类型': safe_str(base_item.get('招生类型', '')),
+            '选测等级': '',
+            '最高分': '',
+            '最低分': '',
+            '平均分': '',
+            '最高位次': '',
+            '最低位次': '',
+            '平均位次': '',
+            '录取人数': '',
+            '招生人数': recruit_num_str,
+            '数据来源': safe_str(base_item.get('数据来源', '')),
+            '省控线科类': '',
+            '省控线批次': '',
+            '省控线备注': '',
+            '专业组代码': group_code,
+            '首选科目': '',
+            '院校招生代码': recruit_code
+        }
+
+        # 处理首选科目：只有招生类别为物理类/历史类时才填入
+        category = college_record['招生类别']
+        if '物理类' in category or category == '物理':
+            college_record['首选科目'] = '物理'
+        elif '历史类' in category or category == '历史':
+            college_record['首选科目'] = '历史'
+
+        college_score_data.append(college_record)
+
+    return college_score_data
+
+
+def export_college_score_data_to_excel(college_score_data, conversion_data, output_path):
+    """导出院校分格式的Excel文件"""
+    # 创建备注文本
+    remark_text = """备注：请删除示例后再填写；
+1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
+2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
+3.批次：（以下为19年使用批次）
+    北京、天津、辽宁、上海、山东、广东、海南限定本科提前批、本科批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+    山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
+    浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
+4.最高分、最低分、平均分：仅能填写数字（最多保留2位小数），且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
+5.最低分位次：仅能填写数字
+6.录取人数：仅能填写数字
+7.首选科目：新八省必填，只能填写（历史或物理）"""
+
+    # 创建工作簿
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    # 第一行：合并A1-U1并写入备注
+    ws.merge_cells('A1:U1')
+    ws['A1'] = remark_text
+    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
+    # 设置第一行行高为220磅
+    ws.row_dimensions[1].height = 220
+
+    # 第二行：A2="招生年"，B2=年份，C2="1"，D2="模板类型（模板标识不要更改）"
+    ws['A2'] = '招生年'
+    # 从conversion_data中提取年份
+    year_value = ''
+    if conversion_data and len(conversion_data) > 0:
+        year_value = conversion_data[0].get('年份', '') or ''
+        if year_value:
+            year_value = str(year_value).strip()
+
+    # B2设置为文本格式
+    ws['B2'] = year_value
+    ws['B2'].number_format = numbers.FORMAT_TEXT
+    ws['C2'] = 1
+    ws['D2'] = '模板类型（模板标识不要更改）'
+
+    # 第三行：标题行
+    headers = ['学校名称', '省份', '招生类别', '招生批次', '招生类型', '选测等级',
+               '最高分', '最低分', '平均分', '最高位次', '最低位次', '平均位次',
+               '录取人数', '招生人数', '数据来源', '省控线科类', '省控线批次', '省控线备注',
+               '专业组代码', '首选科目', '院校招生代码']
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=3, column=col_idx, value=header)
+
+    # 数据行（从第4行开始）
+    for row_idx, row_data in enumerate(college_score_data, start=4):
+        for col_idx, header in enumerate(headers, start=1):
+            value = row_data.get(header, '')
+
+            # 处理空值：将None、NaN、'nan'字符串等转换为空字符串
+            if value is None or pd.isna(value):
+                value = ''
+            elif isinstance(value, str):
+                # 检查是否为'nan'、'None'等字符串
+                if value.lower() in ['nan', 'none']:
+                    value = ''
+
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+
+            # 设置文本格式的列：招生人数、专业组代码、院校招生代码
+            # 这些列需要保持文本格式，即使内容开头为0也不能抹掉
+            if header == '专业组代码' or header == '院校招生代码' or header == '招生人数':
+                # 确保值为字符串格式，并设置为文本格式
+                if value is not None and value != '':
+                    cell.value = str(value)
+                else:
+                    cell.value = ''  # 确保空值写入为空字符串
+                cell.number_format = numbers.FORMAT_TEXT
+
+    wb.save(output_path)
+
+
+def export_converted_data_to_excel(data, conversion_data, output_path):
+    """导出转换后的数据为Excel（保持与HTML中相同的格式）"""
+    from datetime import datetime
+
+    # 创建工作簿
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    # 第1行：备注（合并单元格）
+    remark_text = """备注：请删除示例后再填写；
+1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
+2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
+3.批次：（以下为19年使用批次）
+河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
+浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
+4.招生人数：仅能填写数字
+5.最高分、最低分、平均分：仅能填写数字，保留小数后两位，且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
+6.一级层次：限定"本科、专科（高职）"，该部分为招生专业对应的专业层次
+7.最低分位次：仅能填写数字;
+8.数据来源：必须限定——官方考试院、大红本数据、学校官网、销售、抓取、圣达信、优志愿、学业桥
+9.选科要求：不限科目专业组;多门选考;单科、多科均需选考
+10.选科科目必须是科目的简写（物、化、生、历、地、政、技）
+
+11.2020北京、海南，17-19上海仅限制本科专业组代码必填
+12.新八省首选科目必须选择（物理或历史）
+13.分数区间仅限北京"""
+
+    ws.merge_cells('A1:Y1')
+    ws['A1'] = remark_text
+    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
+    ws.row_dimensions[1].height = 220
+
+    # 第2行：招生年份
+    admission_year = ''
+    if conversion_data and len(conversion_data) > 0 and conversion_data[0].get('年份'):
+        admission_year = conversion_data[0]['年份']
+    ws['A2'] = '招生年份'
+    ws['B2'] = admission_year
+
+    # 第3行：表头
+    headers = [
+        '学校名称', '省份', '招生专业', '专业方向（选填）', '专业备注（选填）',
+        '一级层次', '招生科类', '招生批次', '招生类型（选填）', '最高分',
+        '最低分', '平均分', '最低分位次（选填）', '招生人数（选填）',
+        '数据来源', '专业组代码', '首选科目', '选科要求', '次选科目',
+        '专业代码', '招生代码', '最低分数区间低', '最低分数区间高',
+        '最低分数区间位次低', '最低分数区间位次高', '录取人数（选填）'
+    ]
+    for col_idx, header in enumerate(headers, start=1):
+        ws.cell(row=3, column=col_idx, value=header)
+
+    # 数据行
+    for row_idx, row_data in enumerate(data, start=4):
+        for col_idx, header in enumerate(headers, start=1):
+            value = row_data.get(header, '')
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            # 设置代码列为文本格式
+            if header in ['专业组代码', '专业代码', '招生代码']:
+                cell.number_format = numbers.FORMAT_TEXT
+
+    # 设置列宽
+    for col_idx in range(1, len(headers) + 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 9.36
+
+    wb.save(output_path)
+
+
+# ============================
 # Streamlit页面布局
 # ============================
 # 页面标题
@@ -1790,578 +2442,7 @@ with tab6:
                 st.warning("未抓取到任何图片")
 
 
-# ============================
-# 招生计划数据比对与转换工具相关函数
-# ============================
 
-def generate_plan_score_key(item):
-    """生成招生计划 vs 专业分的组合键"""
-    year = str(item.get('年份', '') or '').strip()
-    province = str(item.get('省份', '') or '').strip()
-    school = str(item.get('学校', '') or '').strip()
-    subject = str(item.get('科类', '') or '').strip()
-    batch = str(item.get('批次', '') or '').strip()
-    major = str(item.get('专业', '') or '').strip()
-    level = str(item.get('层次', '') or '').strip()
-    group_code = str(item.get('专业组代码', '') or '').strip()
-    return f"{year}|{province}|{school}|{subject}|{batch}|{major}|{level}|{group_code}"
-
-
-def generate_plan_college_key(item):
-    """生成招生计划 vs 院校分的组合键"""
-    year = str(item.get('年份', '') or '').strip()
-    province = str(item.get('省份', '') or '').strip()
-    school = str(item.get('学校', '') or '').strip()
-    subject = str(item.get('科类', '') or '').strip()
-    batch = str(item.get('批次', '') or '').strip()
-    group_code = str(item.get('专业组代码', '') or '').strip()
-    return f"{year}|{province}|{school}|{subject}|{batch}|{group_code}"
-
-
-def compare_plan_vs_score(plan_df, score_df):
-    """比对招生计划 vs 专业分"""
-    plan_score_results = []
-    score_key_set = set()
-
-    # 为专业分数据建立索引
-    for _, item in score_df.iterrows():
-        key = generate_plan_score_key(item.to_dict())
-        score_key_set.add(key)
-
-    # 比对招生计划数据
-    for idx, row in plan_df.iterrows():
-        item = row.to_dict()
-        key = generate_plan_score_key(item)
-        exists = key in score_key_set
-
-        plan_score_results.append({
-            'index': idx + 1,
-            'originalIndex': idx,
-            'keyFields': {
-                '年份': item.get('年份', '') or '',
-                '省份': item.get('省份', '') or '',
-                '学校': item.get('学校', '') or '',
-                '科类': item.get('科类', '') or '',
-                '批次': item.get('批次', '') or '',
-                '专业': item.get('专业', '') or '',
-                '层次': item.get('层次', '') or '',
-                '专业组代码': item.get('专业组代码', '') or ''
-            },
-            'exists': exists,
-            'otherInfo': {
-                '招生人数': item.get('招生人数', '') or '',
-                '学费': item.get('学费', '') or '',
-                '学制': item.get('学制', '') or '',
-                '专业代码': item.get('专业代码', '') or '',
-                '招生代码': item.get('招生代码', '') or '',
-                '数据来源': item.get('数据来源', '') or '',
-                '备注': item.get('备注', '') or '',
-                '招生类型': item.get('招生类型', '') or '',
-                '专业组选科要求': item.get('专业组选科要求', '') or '',
-                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
-            }
-        })
-
-    return plan_score_results
-
-
-def compare_plan_vs_college(plan_df, college_df):
-    """比对招生计划 vs 院校分"""
-    plan_college_results = []
-    college_key_set = set()
-
-    # 为院校分数据建立索引
-    for _, item in college_df.iterrows():
-        key = generate_plan_college_key(item.to_dict())
-        college_key_set.add(key)
-
-    # 比对招生计划数据
-    for idx, row in plan_df.iterrows():
-        item = row.to_dict()
-        key = generate_plan_college_key(item)
-        exists = key in college_key_set
-
-        plan_college_results.append({
-            'index': idx + 1,
-            'originalIndex': idx,
-            'keyFields': {
-                '年份': item.get('年份', '') or '',
-                '省份': item.get('省份', '') or '',
-                '学校': item.get('学校', '') or '',
-                '科类': item.get('科类', '') or '',
-                '批次': item.get('批次', '') or '',
-                '专业组代码': item.get('专业组代码', '') or ''
-            },
-            'exists': exists,
-            'otherInfo': {
-                '专业': item.get('专业', '') or '',
-                '层次': item.get('层次', '') or '',
-                '招生人数': item.get('招生人数', '') or '',
-                '学费': item.get('学费', '') or '',
-                '学制': item.get('学制', '') or '',
-                '专业代码': item.get('专业代码', '') or '',
-                '招生代码': item.get('招生代码', '') or '',
-                '数据来源': item.get('数据来源', '') or '',
-                '备注': item.get('备注', '') or '',
-                '招生类型': item.get('招生类型', '') or '',
-                '专业组选科要求': item.get('专业组选科要求', '') or '',
-                '专业选科要求': item.get('专业选科要求(新高考专业省份)', '') or ''
-            }
-        })
-
-    return plan_college_results
-
-
-def get_first_subject(category):
-    """获取首选科目：根据招生科类的第一个字"""
-    if not category:
-        return ''
-    category_str = str(category)
-    if '物理类' in category_str or '物理' in category_str:
-        return '物'
-    elif '历史类' in category_str or '历史' in category_str:
-        return '历'
-    return ''
-
-
-def convert_level(level):
-    """转换层次字段"""
-    if not level:
-        return ''
-    level_str = str(level).lower()
-    if '专科' in level_str or '高职' in level_str:
-        return '专科(高职)'
-    elif '本科' in level_str:
-        return '本科(普通)'
-    return level
-
-
-def extract_required_subjects(text):
-    """提取必选科目（处理"物化生（3科必选）"格式）"""
-    if not text:
-        return []
-
-    subjects = []
-    subject_map = {
-        '物理': '物', '化学': '化', '生物': '生', '历史': '历',
-        '地理': '地', '政治': '政', '技术': '技'
-    }
-
-    # 清理文本，保留中文和顿号、逗号
-    import re
-    clean_text = re.sub(r'[^\u4e00-\u9fa5、，,]', '', str(text)).strip()
-
-    # 处理"物化生（3科必选）"格式：直接提取括号前的内容
-    if '必选' in text and '（' in text and text.index('必选') > text.index('（'):
-        before_bracket = text.split('（')[0]
-        clean_text = before_bracket
-
-    # 处理"物、化、生（3科必选）"格式：顿号分隔的科目
-    if '、' in clean_text or '，' in clean_text or ',' in clean_text:
-        normalized_text = re.sub(r'[、，]', ',', clean_text)
-        parts = [p.strip() for p in normalized_text.split(',') if p.strip()]
-        for part in parts:
-            for full_name, short_name in subject_map.items():
-                if full_name in part or part in full_name:
-                    if short_name not in subjects:
-                        subjects.append(short_name)
-                    break
-    else:
-        # 处理"物化生"这样的连续字符串
-        for full_name, short_name in subject_map.items():
-            if full_name in clean_text:
-                if short_name not in subjects:
-                    subjects.append(short_name)
-
-        # 如果没匹配到全名，尝试按字符匹配
-        if len(subjects) == 0 and len(clean_text) > 0:
-            char_to_short_map = {
-                '物': '物', '化': '化', '生': '生', '历': '历',
-                '地': '地', '政': '政', '技': '技'
-            }
-            for char in clean_text:
-                if char in char_to_short_map and char_to_short_map[char] not in subjects:
-                    subjects.append(char_to_short_map[char])
-
-    return subjects
-
-
-def convert_selection_requirement(group_requirement, major_requirement):
-    """转换选科要求"""
-    selection_requirement = ''
-    second_subject = ''
-
-    # 合并两个要求字段
-    requirement = (str(group_requirement) if group_requirement else '') + (
-        str(major_requirement) if major_requirement else '')
-
-    # 清理特殊字符
-    import re
-    requirement = re.sub(r'^\^+', '', requirement).replace('^', '、').strip()
-
-    if not requirement or requirement == '' or requirement == '、':
-        return selection_requirement, second_subject
-
-    # 根据附件2示例处理各种情况
-    if '不限' in requirement or '再选不限' in requirement:
-        selection_requirement = '不限科目专业组'
-    elif '必选' in requirement:
-        required_subjects = extract_required_subjects(requirement)
-        if len(required_subjects) > 0:
-            selection_requirement = '单科、多科均需选考'
-            second_subject = ''.join(required_subjects)
-
-        # 特殊处理：如果包含"首选"，可能需要排除首选科目
-        if '首选' in requirement:
-            preferred_subjects = []
-            if '首选物理' in requirement:
-                preferred_subjects.append('物')
-            if '首选历史' in requirement:
-                preferred_subjects.append('历')
-
-            filtered_subjects = [s for s in required_subjects if s not in preferred_subjects]
-            if len(filtered_subjects) > 0:
-                second_subject = ''.join(filtered_subjects)
-    elif '首选' in requirement and '再选' in requirement:
-        re_select_part = requirement.split('再选')[1] if '再选' in requirement else ''
-        re_select_subjects = extract_required_subjects(re_select_part)
-        if len(re_select_subjects) > 0:
-            selection_requirement = '单科、多科均需选考'
-            second_subject = ''.join(re_select_subjects)
-    elif '或' in requirement or '选1' in requirement:
-        subjects = extract_required_subjects(requirement)
-        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
-        if len(filtered_subjects) > 0:
-            selection_requirement = '多门选考'
-            second_subject = ''.join(filtered_subjects)
-    else:
-        subjects = extract_required_subjects(requirement)
-        filtered_subjects = [s for s in subjects if s not in ['物', '历']]
-        second_subject = ''.join(filtered_subjects)
-        if len(filtered_subjects) > 0:
-            selection_requirement = '单科、多科均需选考'
-
-    return selection_requirement, second_subject
-
-
-def convert_to_text(value):
-    """转换为文本格式"""
-    if not value and value != 0:
-        return ''
-    text = str(value).lstrip('^').strip()
-    if text == '':
-        return ''
-    text = text.lstrip("'")
-    return text
-
-
-def convert_data(source_data):
-    """转换数据主函数"""
-    converted = []
-
-    for row in source_data:
-        new_row = {}
-
-        # 基础字段映射
-        new_row['学校名称'] = row.get('学校', '') or ''
-        new_row['省份'] = row.get('省份', '') or ''
-        new_row['招生专业'] = row.get('专业', '') or ''
-        new_row['招生科类'] = row.get('科类', '') or ''
-        new_row['招生批次'] = row.get('批次', '') or ''
-        new_row['招生类型（选填）'] = row.get('招生类型', '') or ''
-        new_row['专业备注（选填）'] = row.get('备注', '') or ''
-        new_row['招生人数（选填）'] = row.get('招生人数', '') or ''
-        new_row['数据来源'] = row.get('数据来源', '') or ''
-
-        # 处理层次字段
-        new_row['一级层次'] = convert_level(row.get('层次', ''))
-
-        # 处理代码字段（保持文本格式）
-        new_row['招生代码'] = convert_to_text(row.get('招生代码', ''))
-        new_row['专业代码'] = convert_to_text(row.get('专业代码', ''))
-        new_row['专业组代码'] = convert_to_text(row.get('专业组代码', ''))
-
-        # 处理首选科目
-        new_row['首选科目'] = get_first_subject(row.get('科类', ''))
-
-        # 处理选科要求
-        selection_requirement, second_subject = convert_selection_requirement(
-            row.get('专业组选科要求', ''),
-            row.get('专业选科要求(新高考专业省份)', '')
-        )
-        new_row['选科要求'] = selection_requirement
-        new_row['次选科目'] = second_subject
-
-        # 其他字段（留空）
-        new_row['专业方向（选填）'] = ''
-        new_row['最高分'] = ''
-        new_row['最低分'] = ''
-        new_row['平均分'] = ''
-        new_row['最低分位次（选填）'] = ''
-        new_row['最低分数区间低'] = ''
-        new_row['最低分数区间高'] = ''
-        new_row['最低分数区间位次低'] = ''
-        new_row['最低分数区间位次高'] = ''
-        new_row['录取人数（选填）'] = ''
-
-        converted.append(new_row)
-
-    return converted
-
-
-def convert_to_college_score_format(conversion_data):
-    """将招生计划数据转换为院校分格式"""
-    if not conversion_data:
-        return []
-
-    # 辅助函数：安全地处理空值，将None、NaN等转换为空字符串
-    def safe_str(value, default=''):
-        """安全地将值转换为字符串，处理None、NaN等情况"""
-        if value is None:
-            return default
-        if pd.isna(value):
-            return default
-        value_str = str(value).strip()
-        # 检查是否为'nan'、'None'等字符串
-        if value_str.lower() in ['nan', 'none', '']:
-            return default
-        return value_str
-
-    # 构建分组键：省份、学校、科类、批次、招生类型、层次、专业组代码
-    # 如果专业组代码为空，则不包含在分组键中
-    def get_group_key(item):
-        province = safe_str(item.get('省份', ''))
-        school = safe_str(item.get('学校', ''))
-        subject = safe_str(item.get('科类', ''))
-        batch = safe_str(item.get('批次', ''))
-        recruit_type = safe_str(item.get('招生类型', ''))
-        level = safe_str(item.get('层次', ''))
-        group_code = safe_str(item.get('专业组代码', ''))
-
-        # 如果专业组代码为空或只有^，则不包含在分组键中
-        if not group_code or group_code == '^' or group_code == '':
-            return (province, school, subject, batch, recruit_type, level)
-        else:
-            return (province, school, subject, batch, recruit_type, level, group_code)
-
-    # 按分组键分组
-    grouped_data = {}
-    for item in conversion_data:
-        key = get_group_key(item)
-        if key not in grouped_data:
-            grouped_data[key] = []
-        grouped_data[key].append(item)
-
-    # 转换为院校分格式
-    college_score_data = []
-    for key, items in grouped_data.items():
-        # 取第一条记录作为基础数据
-        base_item = items[0]
-
-        # 计算招生人数总和
-        total_recruit_num = 0
-        for item in items:
-            recruit_num = item.get('招生人数', '') or ''
-            if recruit_num and not pd.isna(recruit_num):
-                try:
-                    total_recruit_num += float(str(recruit_num))
-                except:
-                    pass
-
-        # 处理专业组代码：如果为空或只有^，则设为空字符串
-        group_code = safe_str(base_item.get('专业组代码', '')).lstrip('^')
-        if not group_code or group_code == '^':
-            group_code = ''
-
-        # 处理院校招生代码：去除开头的^符号
-        recruit_code = safe_str(base_item.get('招生代码', '')).lstrip('^')
-
-        # 处理招生人数：保持为字符串格式（文本格式）
-        recruit_num_str = str(int(total_recruit_num)) if total_recruit_num > 0 else ''
-
-        # 构建院校分记录
-        college_record = {
-            '学校名称': safe_str(base_item.get('学校', '')),
-            '省份': safe_str(base_item.get('省份', '')),
-            '招生类别': safe_str(base_item.get('科类', '')),
-            '招生批次': safe_str(base_item.get('批次', '')),
-            '招生类型': safe_str(base_item.get('招生类型', '')),
-            '选测等级': '',
-            '最高分': '',
-            '最低分': '',
-            '平均分': '',
-            '最高位次': '',
-            '最低位次': '',
-            '平均位次': '',
-            '录取人数': '',
-            '招生人数': recruit_num_str,
-            '数据来源': safe_str(base_item.get('数据来源', '')),
-            '省控线科类': '',
-            '省控线批次': '',
-            '省控线备注': '',
-            '专业组代码': group_code,
-            '首选科目': '',
-            '院校招生代码': recruit_code
-        }
-
-        # 处理首选科目：只有招生类别为物理类/历史类时才填入
-        category = college_record['招生类别']
-        if '物理类' in category or category == '物理':
-            college_record['首选科目'] = '物理'
-        elif '历史类' in category or category == '历史':
-            college_record['首选科目'] = '历史'
-
-        college_score_data.append(college_record)
-
-    return college_score_data
-
-
-def export_college_score_data_to_excel(college_score_data, conversion_data, output_path):
-    """导出院校分格式的Excel文件"""
-    # 创建备注文本
-    remark_text = """备注：请删除示例后再填写；
-1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
-2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
-3.批次：（以下为19年使用批次）
-    北京、天津、辽宁、上海、山东、广东、海南限定本科提前批、本科批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
-    河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
-    黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
-    山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
-    浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
-4.最高分、最低分、平均分：仅能填写数字（最多保留2位小数），且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
-5.最低分位次：仅能填写数字
-6.录取人数：仅能填写数字
-7.首选科目：新八省必填，只能填写（历史或物理）"""
-
-    # 创建工作簿
-    wb = openpyxl.Workbook()
-    ws = wb.active
-
-    # 第一行：合并A1-U1并写入备注
-    ws.merge_cells('A1:U1')
-    ws['A1'] = remark_text
-    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
-    # 设置第一行行高为220磅
-    ws.row_dimensions[1].height = 220
-
-    # 第二行：A2="招生年"，B2=年份，C2="1"，D2="模板类型（模板标识不要更改）"
-    ws['A2'] = '招生年'
-    # 从conversion_data中提取年份
-    year_value = ''
-    if conversion_data and len(conversion_data) > 0:
-        year_value = conversion_data[0].get('年份', '') or ''
-        if year_value:
-            year_value = str(year_value).strip()
-
-    # B2设置为文本格式
-    ws['B2'] = year_value
-    ws['B2'].number_format = numbers.FORMAT_TEXT
-    ws['C2'] = 1
-    ws['D2'] = '模板类型（模板标识不要更改）'
-
-    # 第三行：标题行
-    headers = ['学校名称', '省份', '招生类别', '招生批次', '招生类型', '选测等级',
-               '最高分', '最低分', '平均分', '最高位次', '最低位次', '平均位次',
-               '录取人数', '招生人数', '数据来源', '省控线科类', '省控线批次', '省控线备注',
-               '专业组代码', '首选科目', '院校招生代码']
-    for col_idx, header in enumerate(headers, start=1):
-        ws.cell(row=3, column=col_idx, value=header)
-
-    # 数据行（从第4行开始）
-    for row_idx, row_data in enumerate(college_score_data, start=4):
-        for col_idx, header in enumerate(headers, start=1):
-            value = row_data.get(header, '')
-
-            # 处理空值：将None、NaN、'nan'字符串等转换为空字符串
-            if value is None or pd.isna(value):
-                value = ''
-            elif isinstance(value, str):
-                # 检查是否为'nan'、'None'等字符串
-                if value.lower() in ['nan', 'none']:
-                    value = ''
-
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-
-            # 设置文本格式的列：招生人数、专业组代码、院校招生代码
-            # 这些列需要保持文本格式，即使内容开头为0也不能抹掉
-            if header == '专业组代码' or header == '院校招生代码' or header == '招生人数':
-                # 确保值为字符串格式，并设置为文本格式
-                if value is not None and value != '':
-                    cell.value = str(value)
-                else:
-                    cell.value = ''  # 确保空值写入为空字符串
-                cell.number_format = numbers.FORMAT_TEXT
-
-    wb.save(output_path)
-
-
-def export_converted_data_to_excel(data, conversion_data, output_path):
-    """导出转换后的数据为Excel（保持与HTML中相同的格式）"""
-    from datetime import datetime
-
-    # 创建工作簿
-    wb = openpyxl.Workbook()
-    ws = wb.active
-
-    # 第1行：备注（合并单元格）
-    remark_text = """备注：请删除示例后再填写；
-1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等
-2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
-3.批次：（以下为19年使用批次）
-河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
-黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
-山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
-浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
-4.招生人数：仅能填写数字
-5.最高分、最低分、平均分：仅能填写数字，保留小数后两位，且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
-6.一级层次：限定"本科、专科（高职）"，该部分为招生专业对应的专业层次
-7.最低分位次：仅能填写数字;
-8.数据来源：必须限定——官方考试院、大红本数据、学校官网、销售、抓取、圣达信、优志愿、学业桥
-9.选科要求：不限科目专业组;多门选考;单科、多科均需选考
-10.选科科目必须是科目的简写（物、化、生、历、地、政、技）
-
-11.2020北京、海南，17-19上海仅限制本科专业组代码必填
-12.新八省首选科目必须选择（物理或历史）
-13.分数区间仅限北京"""
-
-    ws.merge_cells('A1:Y1')
-    ws['A1'] = remark_text
-    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
-    ws.row_dimensions[1].height = 220
-
-    # 第2行：招生年份
-    admission_year = ''
-    if conversion_data and len(conversion_data) > 0 and conversion_data[0].get('年份'):
-        admission_year = conversion_data[0]['年份']
-    ws['A2'] = '招生年份'
-    ws['B2'] = admission_year
-
-    # 第3行：表头
-    headers = [
-        '学校名称', '省份', '招生专业', '专业方向（选填）', '专业备注（选填）',
-        '一级层次', '招生科类', '招生批次', '招生类型（选填）', '最高分',
-        '最低分', '平均分', '最低分位次（选填）', '招生人数（选填）',
-        '数据来源', '专业组代码', '首选科目', '选科要求', '次选科目',
-        '专业代码', '招生代码', '最低分数区间低', '最低分数区间高',
-        '最低分数区间位次低', '最低分数区间位次高', '录取人数（选填）'
-    ]
-    for col_idx, header in enumerate(headers, start=1):
-        ws.cell(row=3, column=col_idx, value=header)
-
-    # 数据行
-    for row_idx, row_data in enumerate(data, start=4):
-        for col_idx, header in enumerate(headers, start=1):
-            value = row_data.get(header, '')
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            # 设置代码列为文本格式
-            if header in ['专业组代码', '专业代码', '招生代码']:
-                cell.number_format = numbers.FORMAT_TEXT
-
-    # 设置列宽
-    for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 9.36
-
-    wb.save(output_path)
 
 
 # ====================== tab7：招生计划工具======================
