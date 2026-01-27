@@ -25,7 +25,7 @@ import io
 # ============================
 # 设置页面配置
 st.set_page_config(
-    page_title="数据处理工具——测试",
+    page_title="数据处理工具",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1041,7 +1041,7 @@ def images_to_pdf(image_paths, pdf_path):
 # Streamlit页面布局
 # ============================
 # 页面标题
-st.title("📊 数据处理工具——测试")
+st.title("📊 数据处理工具")
 st.markdown("---")
 
 # 功能说明
@@ -1345,65 +1345,82 @@ with tab4:
 
 # ====================== 专业组代码匹配 ======================
 with tab5:
-    st.header("专业组代码匹配（需要检查！）")
+    st.header("专业组代码匹配")
 
-    uploaded_fileA = st.file_uploader("上传专业分导入模板", type=["xls", "xlsx"], key="fileA")
-    uploaded_fileB = st.file_uploader("上传招生计划数据导出文件", type=["xls", "xlsx"], key="fileB")
+    uploaded_fileA = st.file_uploader("上传专业分导入模板 (文件A)", type=["xls", "xlsx"], key="fileA")
+    uploaded_fileB = st.file_uploader("上传招生计划数据导出文件 (文件B)", type=["xls", "xlsx"], key="fileB")
 
     if uploaded_fileA and uploaded_fileB:
-        st.success(f"已选择文件：{uploaded_fileA.name} 和 {uploaded_fileB.name}")
+        # 直接读取，不写临时文件，提高效率
+        dfA = pd.read_excel(uploaded_fileA, header=2)
+        dfB = pd.read_excel(uploaded_fileB)
 
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        status_text.text("等待开始处理...")
+        if "processed_data" not in st.session_state:
+            if st.button("开始分析冲突", key="start_match"):
+                df_auto, df_to_fix = analyze_and_match(dfA, dfB)
+                st.session_state.df_auto = df_auto
+                st.session_state.df_to_fix = df_to_fix
+                st.session_state.processed_data = True
 
-        if st.button("开始数据处理", key="start_match"):
-            try:
-                # 保存临时文件
-                temp_fileA = "tempA.xlsx"
-                temp_fileB = "tempB.xlsx"
-                with open(temp_fileA, "wb") as f:
-                    f.write(uploaded_fileA.getbuffer())
-                with open(temp_fileB, "wb") as f:
-                    f.write(uploaded_fileB.getbuffer())
+        if "processed_data" in st.session_state:
+            df_auto = st.session_state.df_auto
+            df_to_fix = st.session_state.df_to_fix
 
-                status_text.text("读取文件...")
-                progress_bar.progress(10)
+            st.divider()
 
-                dfA = pd.read_excel(temp_fileA, header=2)
-                dfB = pd.read_excel(temp_fileB)
+            if len(df_to_fix) > 0:
+                st.warning(f"检测到 {len(df_to_fix)} 条数据无法自动唯一匹配，请手动核对或从下拉框选择。")
 
-                status_text.text("开始处理数据...")
-                for percent_complete in range(20, 101, 20):
-                    progress_bar.progress(percent_complete)
-                    # 模拟处理时间，如果不需要可以去掉
-                    # time.sleep(0.2)
+                # 构造下拉框选项：提取 B 表中所有的专业组代码作为全局备选池
+                all_codes = sorted(dfB['专业组代码'].unique().tolist())
 
-                result_df = process_data(dfA, dfB)
+                # 使用 data_editor 让用户编辑
+                # 我们在 df_to_fix 中增加一列处理后的代码
+                if 'manual_result' not in st.session_state:
+                    df_to_fix['专业组代码_新'] = ""
+                    # 尝试把原有的备选列表转成字符串方便用户看
+                    df_to_fix['备选代码参考'] = df_to_fix['专业组代码'].apply(
+                        lambda x: str(x) if isinstance(x, (list, np.ndarray)) else "未找到")
+                    st.session_state.manual_result = df_to_fix
 
-                status_text.text("处理完成！准备导出...")
-                progress_bar.progress(100)
+                edited_df = st.data_editor(
+                    st.session_state.manual_result,
+                    column_config={
+                        "专业组代码_新": st.column_config.SelectboxColumn(
+                            "选择正确代码",
+                            help="从招生计划中匹配到的代码中选择一个",
+                            width="medium",
+                            options=all_codes,  # 这里是全局代码池
+                            required=True,
+                        ),
+                        "专业组代码": None,  # 隐藏原始的数组列
+                    },
+                    disabled=["省份", "学校名称", "招生专业", "招生科类", "招生批次", "备选代码参考"],
+                    hide_index=True,
+                    key="fix_editor"
+                )
 
-                # 导出结果到内存
+                if st.button("确认并导出最终结果"):
+                    # 合并自动匹配和手动匹配的结果
+                    edited_df['专业组代码'] = edited_df['专业组代码_新']
+                    final_df = pd.concat([df_auto, edited_df.drop(columns=['专业组代码_新', '备选代码参考'])])
+
+                    # 导出
+                    output = BytesIO()
+                    final_df.to_excel(output, index=False)
+                    st.download_button(
+                        label="📥 下载最终匹配结果",
+                        data=output.getvalue(),
+                        file_name="匹配结果_已校对.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    st.balloons()
+            else:
+                st.success("全部数据已唯一匹配成功！")
+                # 直接提供下载
                 output = BytesIO()
-                result_df.to_excel(output, index=False)
-                output.seek(0)
-
-                b64 = base64.b64encode(output.read()).decode()
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="专业组代码匹配结果.xlsx">点击下载匹配结果</a>'
-                st.markdown(href, unsafe_allow_html=True)
-
-                # 清理临时文件
-                os.remove(temp_fileA)
-                os.remove(temp_fileB)
-
-                status_text.text("已完成，结果可下载。")
-                st.balloons()
-
-            except Exception as e:
-                st.error(f"处理错误：{e}")
-    else:
-        st.info("请先上传两个Excel文件")
+                df_auto.to_excel(output, index=False)
+                st.download_button("📥 下载匹配结果", data=output.getvalue(), file_name="专业组代码匹配结果.xlsx")
 
 # ====================== tab5：网页图片提取PDF ======================
 with tab6:
@@ -2003,8 +2020,8 @@ def export_converted_data_to_excel(data, conversion_data, output_path):
 
 # ====================== tab7：招生计划工具======================
 with tab7:
-    st.header("🎓 招生计划数据比对与转换工具")
-    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分格式")
+    st.header("招生计划数据比对与转换工具")
+    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分和院校分格式")
     
     # 初始化session state
     if 'plan_data' not in st.session_state:
@@ -2058,7 +2075,7 @@ with tab7:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.subheader("📋 招生计划文件")
+        st.subheader("招生计划文件")
         plan_file = st.file_uploader("上传招生计划文件", type=["xlsx", "xls"], key="tab7_plan_file")
         if plan_file is not None:
             try:
@@ -2069,7 +2086,7 @@ with tab7:
                 st.error(f"❌ 文件读取失败: {str(e)}")
     
     with col2:
-        st.subheader("📊 专业分文件")
+        st.subheader("专业分文件")
         score_file = st.file_uploader("上传专业分文件", type=["xlsx", "xls"], key="tab7_score_file")
         if score_file is not None:
             try:
@@ -2080,7 +2097,7 @@ with tab7:
                 st.error(f"❌ 文件读取失败: {str(e)}")
     
     with col3:
-        st.subheader("🏫 院校分文件")
+        st.subheader("院校分文件")
         college_file = st.file_uploader("上传院校分文件", type=["xlsx", "xls"], key="tab7_college_file")
         if college_file is not None:
             try:
