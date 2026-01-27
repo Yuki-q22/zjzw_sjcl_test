@@ -907,73 +907,63 @@ def process_segmentation_file(file_path):
 # 专业组代码匹配
 # ============================
 
-tableA_fields = [
-    "学校名称", "省份", "招生专业", "专业备注（选填）",
-    "一级层次", "招生科类", "招生批次", "招生类型（选填）"
-]
 
-rename_mapping_B = {
-    "学校": "学校名称",
-    "省份": "省份",
-    "层次": "一级层次",
-    "科类": "招生科类",
-    "批次": "招生批次",
-    "招生类型": "招生类型（选填）",
-    "专业": "招生专业",
-    "备注": "专业备注（选填）"
-}
+def analyze_and_match(df_score, df_plan):
+    """
+    df_score: 专业分导入模板 (文件A)
+    df_plan: 招生计划数据 (文件B)
+    """
+    # 1. 统一字段名（根据你的描述映射）
+    # A表字段：省份、学校名称、招生专业、一级层次、招生科类、招生批次
+    # B表字段：省份、学校、科类、批次、专业、专业组代码
 
+    # 预处理：去空格、转字符串
+    for df in [df_score, df_plan]:
+        for col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
 
-def process_data(dfA, dfB):
-    dfB.rename(columns=rename_mapping_B, inplace=True)
+    # 定义匹配键（对齐A表和B表的口径）
+    key_map = {
+        '省份': '省份',
+        '学校名称': '学校',
+        '招生专业': '专业',
+        '招生科类': '科类',
+        '招生批次': '批次'
+    }
 
-    # 构建组合键（不含备注）：学校-省份-层次-科类-批次-招生类型-专业
-    key_fields = [f for f in tableA_fields if f != "专业备注（选填）"]
-    dfA["组合键"] = dfA[key_fields].fillna("").astype(str).apply(
-        lambda x: "|".join([str(i).strip() for i in x]), axis=1)
-    dfB["组合键"] = dfB[key_fields].fillna("").astype(str).apply(
-        lambda x: "|".join([str(i).strip() for i in x]), axis=1)
+    # 在 B 表（招生计划）中建立“键”到“专业组代码”的映射
+    # 考虑到可能有多对一，先看每个组合对应了多少个代码
+    plan_grouped = df_plan.groupby(['省份', '学校', '科类', '批次', '专业'])['专业组代码'].unique().reset_index()
 
-    # 检查A表和B表中组合键的重复性
-    # 统计A表中每个组合键出现的次数
-    a_key_counts = dfA["组合键"].value_counts()
-    # 统计B表中每个组合键出现的次数
-    b_key_counts = dfB["组合键"].value_counts()
-    
-    # 找出A表中有重复的组合键（出现次数>1）
-    a_duplicate_keys = set(a_key_counts[a_key_counts > 1].index)
-    # 找出B表中有重复的组合键（出现次数>1）
-    b_duplicate_keys = set(b_key_counts[b_key_counts > 1].index)
+    # 将 B 表的列名重命名为 A 表的列名，方便 merge
+    plan_lookup = plan_grouped.rename(columns={
+        '学校': '学校名称',
+        '专业': '招生专业',
+        '科类': '招生科类',
+        '批次': '招生批次'
+    })
 
-    # 构建B表字典：组合键 → 记录列表
-    b_dict = dfB.groupby("组合键").apply(lambda x: x.to_dict("records")).to_dict()
+    # 3. 合并数据
+    merged = pd.merge(df_score, plan_lookup, on=['省份', '学校名称', '招生专业', '招生科类', '招生批次'], how='left')
 
-    def get_code(row):
-        key = row["组合键"]
-        candidates = b_dict.get(key, [])
-
-        # 情况1：无候选记录
-        if not candidates:
-            return None
-
-        # 检查该组合键在A表或B表中是否有重复
-        has_duplicate_in_a = key in a_duplicate_keys
-        has_duplicate_in_b = key in b_duplicate_keys
-
-        # 如果A表或B表中任何一个有重复，不能按这几个字段直接匹配，返回None
-        if has_duplicate_in_a or has_duplicate_in_b:
-            return None
-
-        # A表和B表中都没有重复，且B表中只有唯一候选记录，可以直接匹配
-        if len(candidates) == 1:
-            return candidates[0]["专业组代码"]
-
-        # 如果B表中有多个候选记录（这种情况理论上不应该出现，因为B表没有重复），返回None
+    # 4. 数据分类
+    # 情况1：唯一匹配 (专业组代码 数组长度为1)
+    def get_single_code(x):
+        if isinstance(x, (list, np.ndarray)) and len(x) == 1:
+            return x[0]
         return None
 
-    dfA["专业组代码"] = dfA.apply(get_code, axis=1)
+    import numpy as np
+    merged['最终代码'] = merged['专业组代码'].apply(get_single_code)
 
-    return dfA
+    # 自动匹配成功的
+    df_auto = merged[merged['最终代码'].notna()].copy()
+    df_auto['专业组代码'] = df_auto['最终代码']
+
+    # 需要手动干预的（没找到，或者有多个备选）
+    df_to_fix = merged[merged['最终代码'].isna()].copy()
+
+    return df_auto.drop(columns=['最终代码']), df_to_fix
 
 
  # ========== 就业质量报告图片提取 ==========
