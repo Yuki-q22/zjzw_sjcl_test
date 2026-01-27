@@ -656,6 +656,19 @@ columns_to_convert_new = [
 
 
 def process_new_template_file(file_path):
+    # 首先读取原始文件的B2单元格内容
+    try:
+        wb_original = openpyxl.load_workbook(file_path, data_only=True)
+        ws_original = wb_original.active
+        b2_value = ws_original['B2'].value
+        if b2_value is None:
+            b2_value = ''
+        else:
+            b2_value = str(b2_value).strip()
+        wb_original.close()
+    except Exception as e:
+        b2_value = ''
+
     try:
         df = pd.read_excel(file_path, header=2, dtype={
             '专业组代码': str,
@@ -714,32 +727,79 @@ def process_new_template_file(file_path):
     if result.empty:
         raise Exception("筛选结果为空。")
 
-    # 保留期望列
-    selected_columns = [col for col in expected_new_columns if col in result.columns]
-    result = result[selected_columns]
+    # 准备新的列名映射
+    new_columns = ['学校名称', '省份', '招生类别', '招生批次', '专业类别', '投档分', '位次', '招生代码', '专业组', '备注', '是否校考']
+    
+    # 创建新的DataFrame，映射字段
+    new_result = pd.DataFrame()
+    new_result['学校名称'] = result['学校名称'] if '学校名称' in result.columns else pd.Series([None] * len(result))
+    new_result['省份'] = result['省份'] if '省份' in result.columns else pd.Series([None] * len(result))
+    new_result['招生类别'] = result['招生类别'] if '招生类别' in result.columns else pd.Series([None] * len(result))
+    new_result['招生批次'] = result['招生批次'] if '招生批次' in result.columns else pd.Series([None] * len(result))
+    new_result['专业类别'] = result['专业类别'] if '专业类别' in result.columns else pd.Series([None] * len(result))
+    new_result['投档分'] = result['最低分'] if '最低分' in result.columns else pd.Series([None] * len(result))
+    new_result['位次'] = result['最低分位次（选填）'] if '最低分位次（选填）' in result.columns else pd.Series([None] * len(result))
+    new_result['招生代码'] = result['招生代码'] if '招生代码' in result.columns else pd.Series([None] * len(result))
+    new_result['专业组'] = result['专业组代码'] if '专业组代码' in result.columns else pd.Series([None] * len(result))
+    new_result['备注'] = result['专业备注（选填）'] if '专业备注（选填）' in result.columns else pd.Series([None] * len(result))
+    # 是否校考：如果存在则使用，否则默认为'否'
+    if '是否校考' in result.columns:
+        new_result['是否校考'] = result['是否校考'].fillna('否')
+    else:
+        new_result['是否校考'] = '否'
 
     # 输出文件路径
     output_path = file_path.replace('.xlsx', '_院校分.xlsx')
 
     try:
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            result.to_excel(writer, index=False)
-            worksheet = writer.sheets['Sheet1']
+        # 创建新的工作簿
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Sheet1'
 
-            # 设置文本格式
-            for col in ['专业组代码', '专业代码', '招生代码']:
-                if col in result.columns:
-                    col_idx = result.columns.get_loc(col) + 1
-                    for row in range(2, len(result) + 2):
-                        worksheet.cell(row=row, column=col_idx).number_format = numbers.FORMAT_TEXT
+        # 第一行：A1-K1合并单元格，行高90磅
+        ws.merge_cells('A1:K1')
+        cell_a1 = ws['A1']
+        cell_a1.value = '备注：请删除示例后再填写；\n1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等\n2.最低分位次：仅能填写数字\n3.录取人数：仅能填写数字\n4.是否校考：有效值【是，否】，不填写或不在有效值中默认\'否\''
+        cell_a1.alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+        ws.row_dimensions[1].height = 90
 
-            for col in columns_to_convert_new:
-                if col in result.columns and col not in ['专业组代码', '专业代码', '招生代码']:
-                    col_idx = result.columns.get_loc(col) + 1
-                    for cell in \
-                    list(worksheet.iter_cols(min_col=col_idx, max_col=col_idx, min_row=2, values_only=False))[0]:
-                        cell.number_format = numbers.FORMAT_TEXT
+        # 第二行：A2="招生年"，B2=原始文件B2的内容
+        ws['A2'] = '招生年'
+        ws['B2'] = b2_value
 
+        # 第三行：标题行
+        for col_idx, col_name in enumerate(new_columns, start=1):
+            ws.cell(row=3, column=col_idx, value=col_name)
+
+        # 第四行开始：数据行
+        for row_idx, (_, row_data) in enumerate(new_result.iterrows(), start=4):
+            ws.cell(row=row_idx, column=1, value=row_data['学校名称'] if pd.notna(row_data['学校名称']) else None)
+            ws.cell(row=row_idx, column=2, value=row_data['省份'] if pd.notna(row_data['省份']) else None)
+            ws.cell(row=row_idx, column=3, value=row_data['招生类别'] if pd.notna(row_data['招生类别']) else None)
+            ws.cell(row=row_idx, column=4, value=row_data['招生批次'] if pd.notna(row_data['招生批次']) else None)
+            ws.cell(row=row_idx, column=5, value=row_data['专业类别'] if pd.notna(row_data['专业类别']) else None)
+            ws.cell(row=row_idx, column=6, value=row_data['投档分'] if pd.notna(row_data['投档分']) else None)
+            ws.cell(row=row_idx, column=7, value=row_data['位次'] if pd.notna(row_data['位次']) else None)
+            ws.cell(row=row_idx, column=8, value=row_data['招生代码'] if pd.notna(row_data['招生代码']) else None)
+            ws.cell(row=row_idx, column=9, value=row_data['专业组'] if pd.notna(row_data['专业组']) else None)
+            ws.cell(row=row_idx, column=10, value=row_data['备注'] if pd.notna(row_data['备注']) else None)
+            ws.cell(row=row_idx, column=11, value=row_data['是否校考'] if pd.notna(row_data['是否校考']) else '否')
+
+        # 设置文本格式（从第4行开始，即数据行）
+        # 需要设置为文本格式的列
+        text_format_cols = ['招生代码', '专业组', '位次']
+        for col_name in text_format_cols:
+            col_idx = new_columns.index(col_name) + 1
+            for row in range(4, len(new_result) + 4):
+                cell = ws.cell(row=row, column=col_idx)
+                if cell.value is not None:
+                    # 将值转换为字符串，然后设置为文本格式
+                    cell.value = str(cell.value)
+                    cell.number_format = numbers.FORMAT_TEXT
+
+        # 保存文件
+        wb.save(output_path)
         return output_path
     except Exception as e:
         raise Exception(f"文件保存失败：{e}")
@@ -2123,7 +2183,7 @@ with tab4:
 
 # ====================== 专业组代码匹配 ======================
 with tab5:
-    st.header("专业组代码匹配（需要检查！）")
+    st.header("专业组代码匹配")
 
     # 初始化session state
     if 'match_result_df' not in st.session_state:
