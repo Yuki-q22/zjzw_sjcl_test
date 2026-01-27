@@ -926,8 +926,8 @@ rename_mapping_B = {
 def process_data(dfA, dfB):
     dfB.rename(columns=rename_mapping_B, inplace=True)
 
-    # 构建组合键（不含备注）：学校-省份-层次-科类-批次-招生类型-专业
-    key_fields = [f for f in tableA_fields if f != "专业备注（选填）"]
+    # 构建组合键（不含备注和招生类型）：学校-省份-层次-科类-批次-专业
+    key_fields = [f for f in tableA_fields if f not in ["专业备注（选填）", "招生类型（选填）"]]
     dfA["组合键"] = dfA[key_fields].fillna("").astype(str).apply(
         lambda x: "|".join([str(i).strip() for i in x]), axis=1)
     dfB["组合键"] = dfB[key_fields].fillna("").astype(str).apply(
