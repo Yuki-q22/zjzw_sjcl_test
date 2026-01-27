@@ -903,6 +903,93 @@ def process_segmentation_file(file_path):
 
 
 # ============================
+# 专业组代码匹配导出函数
+# ============================
+def export_match_result_to_excel(export_df, headers, year_value, output_path):
+    """导出专业组代码匹配结果为Excel格式"""
+    # 创建备注文本
+    remark_text = """备注：请删除示例后再填写；
+1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、
+体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"
+3.批次：（以下为19年使用批次）
+河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、
+本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；
+山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；
+浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段
+4.招生人数：仅能填写数字
+5.最高分、最低分、平均分：仅能填写数字，保留小数后两位，且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数
+6.一级层次：限定"本科、专科（高职）"，该部分为招生专业对应的专业层次
+7.最低分位次：仅能填写数字;
+8.数据来源：必须限定——官方考试院、大红本数据、学校官网、销售、抓取、圣达信、优志愿、学业桥
+9.选科要求：不限科目专业组;多门选考;单科、多科均需选考
+10.选科科目必须是科目的简写（物、化、生、历、地、政、技）
+                    
+11.2020北京、海南，17-19上海仅限制本科专业组代码必填
+12.新八省首选科目必须选择（物理或历史）
+13.分数区间仅限北京"""
+
+    # 创建工作簿
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    # 第一行：合并A1-U1并写入备注
+    ws.merge_cells('A1:U1')
+    ws['A1'] = remark_text
+    ws['A1'].alignment = Alignment(wrap_text=True, vertical='top')
+    # 设置第一行行高为220磅
+    ws.row_dimensions[1].height = 220
+
+    # 第二行：A2="招生年份"，B2=年份值
+    ws['A2'] = '招生年份'
+    ws['B2'] = year_value if year_value else ''
+    # B2设置为文本格式
+    ws['B2'].number_format = numbers.FORMAT_TEXT
+
+    # 处理标题行：如果headers为空或None，使用export_df的列名
+    if not headers or len(headers) == 0:
+        headers = list(export_df.columns)
+    
+    # 清理headers中的None值，并去除空字符串
+    headers = [h if h is not None else '' for h in headers]
+    
+    # 按照headers的顺序导出，确保与原始文件A的第3行标题顺序一致
+    # 如果headers中的列在export_df中存在，使用export_df的值；否则为空
+    final_headers = []
+    for h in headers:
+        if h and h.strip():  # 非空标题
+            final_headers.append(h.strip())
+    
+    # 添加export_df中存在但headers中没有的列（追加到末尾）
+    for col in export_df.columns:
+        if col not in final_headers:
+            final_headers.append(col)
+
+    # 第三行：标题行（使用处理后的标题）
+    for col_idx, header in enumerate(final_headers, start=1):
+        ws.cell(row=3, column=col_idx, value=header if header else '')
+
+    # 数据行（从第4行开始）
+    for row_idx, (_, row_data) in enumerate(export_df.iterrows(), start=4):
+        for col_idx, header in enumerate(final_headers, start=1):
+            if header in export_df.columns:
+                value = row_data[header]
+                # 处理空值
+                if value is None or pd.isna(value):
+                    value = ''
+                elif isinstance(value, str) and value.lower() in ['nan', 'none']:
+                    value = ''
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                # 设置代码列为文本格式
+                if header in ['专业组代码', '专业代码', '招生代码']:
+                    cell.number_format = numbers.FORMAT_TEXT
+            else:
+                ws.cell(row=row_idx, column=col_idx, value='')
+
+    wb.save(output_path)
+
+
+# ============================
 # 专业组代码匹配
 # ============================
 
@@ -2044,6 +2131,10 @@ with tab5:
         st.session_state.temp_fileA_path = None
     if 'temp_fileB_path' not in st.session_state:
         st.session_state.temp_fileB_path = None
+    if 'fileA_headers' not in st.session_state:
+        st.session_state.fileA_headers = None
+    if 'fileB_year' not in st.session_state:
+        st.session_state.fileB_year = None
 
     uploaded_fileA = st.file_uploader("上传专业分导入模板", type=["xls", "xlsx"], key="fileA")
     uploaded_fileB = st.file_uploader("上传招生计划数据导出文件", type=["xls", "xlsx"], key="fileB")
@@ -2070,6 +2161,42 @@ with tab5:
 
                 status_text.text("读取文件...")
                 progress_bar.progress(10)
+
+                # 读取文件A的标题行（第3行）
+                wbA = openpyxl.load_workbook(temp_fileA, data_only=True)
+                wsA = wbA.active
+                headers_row = []
+                # 读取第3行的所有非空单元格
+                max_col = wsA.max_column
+                for col_idx in range(1, max_col + 1):
+                    cell_value = wsA.cell(row=3, column=col_idx).value
+                    headers_row.append(cell_value if cell_value is not None else '')
+                wbA.close()
+                st.session_state.fileA_headers = headers_row
+
+                # 读取文件B的年份（从B2单元格或年份字段）
+                year_value = ''
+                try:
+                    wbB = openpyxl.load_workbook(temp_fileB, data_only=True)
+                    wsB = wbB.active
+                    # 先尝试从B2单元格读取
+                    year_value = wsB['B2'].value
+                    if year_value is None or str(year_value).strip() == '':
+                        # 如果B2为空，尝试从数据中读取年份字段
+                        dfB_temp = pd.read_excel(temp_fileB)
+                        if '年份' in dfB_temp.columns:
+                            year_values = dfB_temp['年份'].dropna()
+                            if len(year_values) > 0:
+                                year_value = year_values.iloc[0]
+                    if year_value is not None:
+                        year_value = str(year_value).strip()
+                    else:
+                        year_value = ''
+                    wbB.close()
+                except Exception as e:
+                    logging.warning(f"读取文件B年份失败：{e}")
+                    year_value = ''
+                st.session_state.fileB_year = year_value
 
                 dfA = pd.read_excel(temp_fileA, header=2)
                 dfB = pd.read_excel(temp_fileB)
@@ -2384,14 +2511,29 @@ with tab5:
             # 移除临时列
             export_df = st.session_state.match_result_df.drop(columns=["组合键"], errors='ignore')
             
-            # 导出结果到内存
-            output = BytesIO()
-            export_df.to_excel(output, index=False)
-            output.seek(0)
-
-            b64 = base64.b64encode(output.read()).decode()
-            href = f'<a href="data:application/octet-stream;base64,{b64}" download="专业组代码匹配结果.xlsx">点击下载匹配结果</a>'
-            st.markdown(href, unsafe_allow_html=True)
+            # 获取标题和年份
+            headers = st.session_state.fileA_headers if st.session_state.fileA_headers else list(export_df.columns)
+            year_value = st.session_state.fileB_year if st.session_state.fileB_year else ''
+            
+            # 导出结果到临时文件
+            temp_output_path = "temp_match_result.xlsx"
+            try:
+                export_match_result_to_excel(export_df, headers, year_value, temp_output_path)
+                
+                # 读取文件并转换为base64
+                with open(temp_output_path, "rb") as f:
+                    bytes_data = f.read()
+                b64 = base64.b64encode(bytes_data).decode()
+                href = f'<a href="data:application/octet-stream;base64,{b64}" download="专业组代码匹配结果.xlsx">点击下载匹配结果</a>'
+                st.markdown(href, unsafe_allow_html=True)
+                
+                # 清理临时文件
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
+            except Exception as e:
+                st.error(f"导出失败：{str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
 
             # 清理临时文件按钮
             if st.button("清理临时文件", key="cleanup_temp"):
