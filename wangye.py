@@ -964,11 +964,8 @@ def process_data(dfA, dfB):
 
         # 如果A表或B表中任何一个有重复，需要手动补充
         if has_duplicate_in_a or has_duplicate_in_b:
-            # 提取候选代码列表
-            candidate_codes = [c.get("专业组代码", "") for c in candidates if c.get("专业组代码")]
-            # 去重并过滤空值
-            candidate_codes = list(set([str(c).strip() for c in candidate_codes if c and str(c).strip()]))
-            return None, candidate_codes
+            # 返回完整的候选记录列表（包含所有字段信息）
+            return None, candidates
 
         # A表和B表中都没有重复，且B表中只有唯一候选记录，可以直接匹配
         if len(candidates) == 1:
@@ -980,11 +977,27 @@ def process_data(dfA, dfB):
     # 应用匹配逻辑
     results = dfA.apply(get_code, axis=1)
     dfA["专业组代码"] = results.apply(lambda x: x[0] if x[0] is not None else "")
-    dfA["候选代码"] = results.apply(lambda x: "|".join(x[1]) if x[1] and len(x[1]) > 0 else "")
-
-    # 收集需要手动补充的记录
+    
+    # 收集需要手动补充的记录（包含完整的候选记录信息）
     for idx, row in dfA.iterrows():
-        if row["候选代码"]:  # 有候选代码，说明需要手动补充
+        result = results.iloc[idx]
+        candidates = result[1] if result[1] is not None else []
+        
+        if candidates:  # 有候选记录，说明需要手动补充
+            # 提取候选记录的详细信息
+            candidate_records = []
+            for candidate in candidates:
+                candidate_records.append({
+                    "专业组代码": candidate.get("专业组代码", ""),
+                    "学校名称": candidate.get("学校名称", ""),
+                    "省份": candidate.get("省份", ""),
+                    "招生专业": candidate.get("招生专业", ""),
+                    "一级层次": candidate.get("一级层次", ""),
+                    "招生科类": candidate.get("招生科类", ""),
+                    "招生批次": candidate.get("招生批次", ""),
+                    "招生类型（选填）": candidate.get("招生类型（选填）", ""),
+                })
+            
             manual_fill_records.append({
                 "索引": idx,
                 "学校名称": row.get("学校名称", ""),
@@ -994,7 +1007,7 @@ def process_data(dfA, dfB):
                 "招生科类": row.get("招生科类", ""),
                 "招生批次": row.get("招生批次", ""),
                 "招生类型（选填）": row.get("招生类型（选填）", ""),
-                "候选代码": row["候选代码"].split("|") if row["候选代码"] else []
+                "候选记录": candidate_records  # 完整的候选记录列表
             })
 
     return dfA, manual_fill_records
@@ -1440,129 +1453,202 @@ with tab5:
                 import traceback
                 st.error(traceback.format_exc())
 
-        # 显示手动补充界面
+        # 显示手动补充界面（弹框形式）
         if st.session_state.match_result_df is not None and len(st.session_state.manual_fill_records) > 0:
             st.markdown("---")
             st.subheader("📝 手动补充专业组代码")
-            st.info(f"以下 {len(st.session_state.manual_fill_records)} 条记录存在重复字段，请从备选代码中选择正确的专业组代码：")
-
-            # 分页显示
-            records_per_page = 10
-            total_pages = (len(st.session_state.manual_fill_records) + records_per_page - 1) // records_per_page
             
-            if total_pages > 1:
-                page = st.number_input("页码", min_value=1, max_value=total_pages, value=1, key="manual_page")
-                start_idx = (page - 1) * records_per_page
-                end_idx = min(start_idx + records_per_page, len(st.session_state.manual_fill_records))
-                display_records = st.session_state.manual_fill_records[start_idx:end_idx]
-                st.caption(f"显示第 {start_idx + 1}-{end_idx} 条，共 {len(st.session_state.manual_fill_records)} 条")
-            else:
-                display_records = st.session_state.manual_fill_records
-
-            # 为每条记录创建选择框
-            for record in display_records:
-                idx = record["索引"]
-                key = f"manual_select_{idx}"
+            # 初始化当前处理的记录索引
+            if 'current_record_idx' not in st.session_state:
+                st.session_state.current_record_idx = 0
+            
+            total_records = len(st.session_state.manual_fill_records)
+            current_record = st.session_state.manual_fill_records[st.session_state.current_record_idx]
+            idx = current_record["索引"]
+            key = f"manual_select_{idx}"
+            
+            # 显示进度
+            progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}"
+            st.progress((st.session_state.current_record_idx + 1) / total_records, text=progress_text)
+            
+            # 弹框形式显示当前记录
+            with st.expander(f"📋 记录 {st.session_state.current_record_idx + 1}：{current_record['学校名称']} - {current_record['招生专业']}", expanded=True):
+                st.markdown("### 当前记录信息")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**学校名称：** {current_record['学校名称']}")
+                    st.write(f"**省份：** {current_record['省份']}")
+                    st.write(f"**招生专业：** {current_record['招生专业']}")
+                    st.write(f"**一级层次：** {current_record['一级层次']}")
+                with col2:
+                    st.write(f"**招生科类：** {current_record['招生科类']}")
+                    st.write(f"**招生批次：** {current_record['招生批次']}")
+                    st.write(f"**招生类型：** {current_record['招生类型（选填）']}")
+                    # 显示当前已选择的值（如果有）
+                    current_value = st.session_state.manual_selections.get(key, "")
+                    if current_value:
+                        st.success(f"**已选择：** {current_value}")
                 
-                # 构建显示信息
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        info_text = f"**记录 {idx + 1}** | 学校：{record['学校名称']} | 省份：{record['省份']} | 专业：{record['招生专业']} | 层次：{record['一级层次']} | 科类：{record['招生科类']} | 批次：{record['招生批次']}"
-                        st.markdown(info_text)
-                    with col2:
-                        # 显示当前已选择的值（如果有）
-                        current_value = st.session_state.manual_selections.get(key, "")
-                        if current_value:
-                            st.success(f"已选择：{current_value}")
+                st.markdown("---")
+                st.markdown("### 招生计划中的候选记录")
                 
-                # 候选代码列表
-                candidate_codes = record["候选代码"]
-                if candidate_codes and len(candidate_codes) > 0:
-                    # 添加"请选择"选项
-                    options = ["请选择"] + candidate_codes
-                    # 获取当前选择（如果有）
-                    current_selection = st.session_state.manual_selections.get(key, "请选择")
-                    default_index = 0
-                    if current_selection in options:
-                        default_index = options.index(current_selection)
+                # 显示候选记录
+                candidate_records = current_record.get("候选记录", [])
+                if candidate_records and len(candidate_records) > 0:
+                    # 显示候选记录的详细信息表格
+                    st.markdown("**候选记录详情：**")
+                    candidate_df = pd.DataFrame(candidate_records)
+                    # 重新排列列的顺序，专业组代码放在最前面
+                    if '专业组代码' in candidate_df.columns:
+                        cols = ['专业组代码'] + [c for c in candidate_df.columns if c != '专业组代码']
+                        candidate_df = candidate_df[cols]
+                    st.dataframe(candidate_df, use_container_width=True, hide_index=True)
                     
-                    selected = st.selectbox(
-                        f"选择专业组代码（记录 {idx + 1}）",
-                        options,
-                        index=default_index,
-                        key=key
-                    )
+                    # 构建选项列表（显示专业组代码）
+                    candidate_options = []
+                    for i, cand in enumerate(candidate_records):
+                        code = cand.get("专业组代码", "")
+                        if code and str(code).strip():
+                            candidate_options.append(str(code).strip())
                     
-                    if selected != "请选择":
-                        st.session_state.manual_selections[key] = selected
+                    # 去重
+                    candidate_options = list(set(candidate_options))
+                    
+                    if candidate_options:
+                        # 添加"请选择"选项
+                        options = ["请选择"] + candidate_options
+                        # 获取当前选择（如果有）
+                        current_selection = st.session_state.manual_selections.get(key, "请选择")
+                        default_index = 0
+                        if current_selection in options:
+                            default_index = options.index(current_selection)
+                        
+                        selected_code = st.selectbox(
+                            "选择专业组代码",
+                            options,
+                            index=default_index,
+                            key=key
+                        )
+                        
+                        if selected_code != "请选择":
+                            st.session_state.manual_selections[key] = selected_code
+                        else:
+                            # 如果用户选择了"请选择"，清除之前的选择
+                            if key in st.session_state.manual_selections:
+                                del st.session_state.manual_selections[key]
                     else:
-                        # 如果用户选择了"请选择"，清除之前的选择
-                        if key in st.session_state.manual_selections:
+                        st.warning("⚠️ 候选记录中没有专业组代码，请手动输入")
+                        input_key = f"{key}_input"
+                        prev_value = st.session_state.get(input_key, "")
+                        manual_input = st.text_input(
+                            "手动输入专业组代码",
+                            value=prev_value,
+                            key=input_key
+                        )
+                        if manual_input and manual_input.strip():
+                            st.session_state.manual_selections[key] = manual_input.strip()
+                        elif key in st.session_state.manual_selections:
                             del st.session_state.manual_selections[key]
-                    
-                    # 显示候选代码提示
-                    st.caption(f"💡 备选代码：{', '.join(candidate_codes)}")
                 else:
-                    st.warning("⚠️ 该记录没有候选代码，请手动输入")
+                    st.warning("⚠️ 该记录没有候选记录，请手动输入")
                     input_key = f"{key}_input"
-                    # 从session_state读取之前的值（如果有）
                     prev_value = st.session_state.get(input_key, "")
                     manual_input = st.text_input(
-                        f"手动输入专业组代码（记录 {idx + 1}）",
+                        "手动输入专业组代码",
                         value=prev_value,
                         key=input_key
                     )
-                    # 将输入值保存到manual_selections中
                     if manual_input and manual_input.strip():
                         st.session_state.manual_selections[key] = manual_input.strip()
                     elif key in st.session_state.manual_selections:
-                        # 如果输入框被清空，也清除选择
                         del st.session_state.manual_selections[key]
-                
-                st.markdown("---")
-
-            # 应用手动选择
-            if st.button("✅ 应用手动选择", type="primary", use_container_width=True):
-                # 更新结果数据框
-                updated_df = st.session_state.match_result_df.copy()
-                applied_count = 0
-                
-                for record in st.session_state.manual_fill_records:
-                    idx = record["索引"]
-                    key = f"manual_select_{idx}"
-                    input_key = f"{key}_input"
-                    
-                    # 检查是否有选择
+            
+            # 导航按钮
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+            with col1:
+                if st.button("⏮️ 第一条", disabled=st.session_state.current_record_idx == 0):
+                    st.session_state.current_record_idx = 0
+                    st.rerun()
+            with col2:
+                if st.button("◀️ 上一条", disabled=st.session_state.current_record_idx == 0):
+                    st.session_state.current_record_idx -= 1
+                    st.rerun()
+            with col3:
+                if st.button("▶️ 下一条", disabled=st.session_state.current_record_idx >= total_records - 1):
+                    st.session_state.current_record_idx += 1
+                    st.rerun()
+            with col4:
+                if st.button("⏭️ 最后一条", disabled=st.session_state.current_record_idx >= total_records - 1):
+                    st.session_state.current_record_idx = total_records - 1
+                    st.rerun()
+            
+            st.markdown("---")
+            
+            # 应用所有手动选择并完成
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("✅ 应用当前选择并继续", type="primary", use_container_width=True):
+                    # 应用当前记录的选择
                     selected_code = None
-                    
-                    # 先检查selectbox的选择（从manual_selections或session_state）
                     if key in st.session_state.manual_selections:
                         selected_code = st.session_state.manual_selections[key]
-                        if selected_code == "请选择":
-                            selected_code = None
-                    elif key in st.session_state:
-                        selected_code = st.session_state[key]
-                        if selected_code == "请选择":
-                            selected_code = None
-                    
-                    # 如果没有selectbox选择，检查text_input（从session_state）
-                    if not selected_code and input_key in st.session_state:
-                        input_value = st.session_state[input_key]
+                    elif f"{key}_input" in st.session_state:
+                        input_value = st.session_state[f"{key}_input"]
                         if input_value and input_value.strip():
                             selected_code = input_value.strip()
                     
-                    # 应用选择
                     if selected_code and selected_code.strip():
+                        updated_df = st.session_state.match_result_df.copy()
                         updated_df.at[idx, "专业组代码"] = selected_code.strip()
-                        applied_count += 1
+                        st.session_state.match_result_df = updated_df
+                        st.success(f"✅ 已应用记录 {st.session_state.current_record_idx + 1} 的选择：{selected_code.strip()}")
+                    
+                    # 移动到下一条
+                    if st.session_state.current_record_idx < total_records - 1:
+                        st.session_state.current_record_idx += 1
+                    st.rerun()
+            
+            with col2:
+                if st.button("✅ 应用所有选择并完成", type="primary", use_container_width=True):
+                    # 更新结果数据框
+                    updated_df = st.session_state.match_result_df.copy()
+                    applied_count = 0
+                    
+                    for record in st.session_state.manual_fill_records:
+                        idx = record["索引"]
+                        key = f"manual_select_{idx}"
+                        input_key = f"{key}_input"
+                        
+                        # 检查是否有选择
+                        selected_code = None
+                        
+                        # 先检查selectbox的选择
+                        if key in st.session_state.manual_selections:
+                            selected_code = st.session_state.manual_selections[key]
+                            if selected_code == "请选择":
+                                selected_code = None
+                        elif key in st.session_state:
+                            selected_code = st.session_state[key]
+                            if selected_code == "请选择":
+                                selected_code = None
+                        
+                        # 如果没有selectbox选择，检查text_input
+                        if not selected_code and input_key in st.session_state:
+                            input_value = st.session_state[input_key]
+                            if input_value and input_value.strip():
+                                selected_code = input_value.strip()
+                        
+                        # 应用选择
+                        if selected_code and selected_code.strip():
+                            updated_df.at[idx, "专业组代码"] = selected_code.strip()
+                            applied_count += 1
 
-                st.session_state.match_result_df = updated_df
-                if applied_count > 0:
-                    st.success(f"✅ 已应用 {applied_count} 条记录的手动选择！")
-                else:
-                    st.warning("⚠️ 没有应用任何选择，请先选择专业组代码")
-                st.rerun()
+                    st.session_state.match_result_df = updated_df
+                    if applied_count > 0:
+                        st.success(f"✅ 已应用 {applied_count} 条记录的手动选择！")
+                    else:
+                        st.warning("⚠️ 没有应用任何选择")
+                    st.rerun()
 
         # 导出结果
         if st.session_state.match_result_df is not None:
@@ -1570,7 +1656,7 @@ with tab5:
             st.subheader("📥 导出结果")
             
             # 移除临时列
-            export_df = st.session_state.match_result_df.drop(columns=["组合键", "候选代码"], errors='ignore')
+            export_df = st.session_state.match_result_df.drop(columns=["组合键"], errors='ignore')
             
             # 导出结果到内存
             output = BytesIO()
