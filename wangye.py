@@ -909,58 +909,69 @@ def process_segmentation_file(file_path):
 
 
 def analyze_and_match(df_score, df_plan):
-    """
-    df_score: 专业分导入模板 (文件A)
-    df_plan: 招生计划数据 (文件B)
-    """
-    # 1. 统一字段名（根据你的描述映射）
-    # A表字段：省份、学校名称、招生专业、一级层次、招生科类、招生批次
-    # B表字段：省份、学校、科类、批次、专业、专业组代码
+    # ---------------- 调试信息 ----------------
+    # 如果运行报错，可以在 Streamlit 页面看到这些列名，方便核对
+    # st.write("文件A列名:", df_score.columns.tolist())
+    # st.write("文件B列名:", df_plan.columns.tolist())
+    # -----------------------------------------
 
-    # 预处理：去空格、转字符串
-    for df in [df_score, df_plan]:
+    df_s = df_score.copy()
+    df_p = df_plan.copy()
+
+    # 1. 检查文件 B 是否包含“专业组代码”
+    target_col = '专业组代码'
+    if target_col not in df_p.columns:
+        # 尝试模糊匹配，防止因为空格或微小差异报错
+        potential_cols = [c for c in df_p.columns if '专业组' in str(c)]
+        if potential_cols:
+            target_col = potential_cols[0]
+            st.warning(f"未找到精确的'专业组代码'列，已自动匹配列：{target_col}")
+        else:
+            raise KeyError(f"在招生计划文件中未找到包含'专业组'字样的列，请检查文件。当前列名有：{list(df_p.columns)}")
+
+    # 2. 预处理：转字符串并去空格
+    for df in [df_s, df_p]:
+        df.columns = df.columns.astype(str).str.strip()  # 先清洗列名本身
         for col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].astype(str).str.strip().replace('nan', '')
 
-    # 定义匹配键（对齐A表和B表的口径）
-    key_map = {
-        '省份': '省份',
-        '学校名称': '学校',
-        '招生专业': '专业',
-        '招生科类': '科类',
-        '招生批次': '批次'
-    }
+    # 3. 建立匹配键
+    # 注意：这里要确保这些列名在你的 Excel 里真实存在
+    keys_plan = ['省份', '学校', '科类', '批次', '专业']
 
-    # 在 B 表（招生计划）中建立“键”到“专业组代码”的映射
-    # 考虑到可能有多对一，先看每个组合对应了多少个代码
-    plan_grouped = df_plan.groupby(['省份', '学校', '科类', '批次', '专业'])['专业组代码'].unique().reset_index()
+    # 检查 B 表是否缺少必要的匹配字段
+    missing_keys = [k for k in keys_plan if k not in df_p.columns]
+    if missing_keys:
+        raise KeyError(f"招生计划文件缺少必要列: {missing_keys}")
 
-    # 将 B 表的列名重命名为 A 表的列名，方便 merge
-    plan_lookup = plan_grouped.rename(columns={
+    # 4. 在 B 表中聚合代码
+    # 这里使用刚才确定的 target_col (即专业组代码)
+    plan_lookup = df_p.groupby(keys_plan)[target_col].unique().reset_index()
+
+    # 重命名方便 merge
+    plan_lookup = plan_lookup.rename(columns={
         '学校': '学校名称',
         '专业': '招生专业',
         '科类': '招生科类',
-        '批次': '招生批次'
+        '批次': '招生批次',
+        target_col: '专业组代码'  # 统一改为这个名字供后续调用
     })
 
-    # 3. 合并数据
-    merged = pd.merge(df_score, plan_lookup, on=['省份', '学校名称', '招生专业', '招生科类', '招生批次'], how='left')
+    # 5. 合并
+    keys_score = ['省份', '学校名称', '招生科类', '招生批次', '招生专业']
+    merged = pd.merge(df_s, plan_lookup, on=keys_score, how='left')
 
-    # 4. 数据分类
-    # 情况1：唯一匹配 (专业组代码 数组长度为1)
+    # 6. 识别唯一/冲突
     def get_single_code(x):
         if isinstance(x, (list, np.ndarray)) and len(x) == 1:
             return x[0]
         return None
 
-    import numpy as np
     merged['最终代码'] = merged['专业组代码'].apply(get_single_code)
 
-    # 自动匹配成功的
     df_auto = merged[merged['最终代码'].notna()].copy()
     df_auto['专业组代码'] = df_auto['最终代码']
 
-    # 需要手动干预的（没找到，或者有多个备选）
     df_to_fix = merged[merged['最终代码'].isna()].copy()
 
     return df_auto.drop(columns=['最终代码']), df_to_fix
