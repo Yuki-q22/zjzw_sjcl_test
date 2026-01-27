@@ -2174,25 +2174,42 @@ with tab5:
                 wbA.close()
                 st.session_state.fileA_headers = headers_row
 
-                # 读取文件B的年份（从B2单元格或年份字段）
+                # 读取文件B的年份（从A列年份字段读取）
                 year_value = ''
                 try:
-                    wbB = openpyxl.load_workbook(temp_fileB, data_only=True)
-                    wsB = wbB.active
-                    # 先尝试从B2单元格读取
-                    year_value = wsB['B2'].value
-                    if year_value is None or str(year_value).strip() == '':
-                        # 如果B2为空，尝试从数据中读取年份字段
-                        dfB_temp = pd.read_excel(temp_fileB)
-                        if '年份' in dfB_temp.columns:
-                            year_values = dfB_temp['年份'].dropna()
-                            if len(year_values) > 0:
-                                year_value = year_values.iloc[0]
+                    # 先尝试从数据中读取年份字段（A列）
+                    dfB_temp = pd.read_excel(temp_fileB)
+                    if '年份' in dfB_temp.columns:
+                        year_values = dfB_temp['年份'].dropna()
+                        if len(year_values) > 0:
+                            year_value = year_values.iloc[0]
+                    # 如果年份字段不存在，尝试从A列第一行数据读取
+                    elif len(dfB_temp) > 0:
+                        # 尝试读取A列的第一行数据
+                        first_col = dfB_temp.iloc[:, 0]
+                        if len(first_col) > 0:
+                            first_value = first_col.iloc[0]
+                            # 如果第一行数据看起来像年份（4位数字）
+                            if first_value and str(first_value).strip().isdigit() and len(str(first_value).strip()) == 4:
+                                year_value = str(first_value).strip()
+                    # 如果还是没找到，尝试从Excel文件的A列读取
+                    if not year_value or year_value == '':
+                        wbB = openpyxl.load_workbook(temp_fileB, data_only=True)
+                        wsB = wbB.active
+                        # 从A列查找年份（跳过可能的标题行，从第2行开始查找）
+                        for row_idx in range(2, min(wsB.max_row + 1, 100)):  # 最多查找100行
+                            cell_value = wsB[f'A{row_idx}'].value
+                            if cell_value:
+                                cell_str = str(cell_value).strip()
+                                # 如果看起来像年份（4位数字）
+                                if cell_str.isdigit() and len(cell_str) == 4:
+                                    year_value = cell_str
+                                    break
+                        wbB.close()
                     if year_value is not None:
                         year_value = str(year_value).strip()
                     else:
                         year_value = ''
-                    wbB.close()
                 except Exception as e:
                     logging.warning(f"读取文件B年份失败：{e}")
                     year_value = ''
