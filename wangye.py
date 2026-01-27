@@ -2612,7 +2612,7 @@ with tab6:
 # ====================== tab7：招生计划工具======================
 with tab7:
     st.header("招生计划数据比对与转换工具")
-    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分格式")
+    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分/院校分格式")
 
     # 初始化session state
     if 'plan_data' not in st.session_state:
