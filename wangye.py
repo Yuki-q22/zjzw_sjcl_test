@@ -996,6 +996,7 @@ def process_data(dfA, dfB):
                     "招生科类": candidate.get("招生科类", ""),
                     "招生批次": candidate.get("招生批次", ""),
                     "招生类型（选填）": candidate.get("招生类型（选填）", ""),
+                    "备注（招生计划）": candidate.get("专业备注（选填）", ""),  # B表重命名后的备注字段
                 })
             
             manual_fill_records.append({
@@ -1007,6 +1008,7 @@ def process_data(dfA, dfB):
                 "招生科类": row.get("招生科类", ""),
                 "招生批次": row.get("招生批次", ""),
                 "招生类型（选填）": row.get("招生类型（选填）", ""),
+                "专业备注（选填）": row.get("专业备注（选填）", ""),  # A表的专业备注字段
                 "候选记录": candidate_records  # 完整的候选记录列表
             })
 
@@ -1473,7 +1475,7 @@ with tab5:
             
             # 弹框形式显示当前记录
             with st.expander(f"📋 记录 {st.session_state.current_record_idx + 1}：{current_record['学校名称']} - {current_record['招生专业']}", expanded=True):
-                st.markdown("### 当前记录信息")
+                st.markdown("### 当前记录信息（专业分文件）")
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**学校名称：** {current_record['学校名称']}")
@@ -1488,6 +1490,11 @@ with tab5:
                     current_value = st.session_state.manual_selections.get(key, "")
                     if current_value:
                         st.success(f"**已选择：** {current_value}")
+                
+                # 显示专业备注（选填）字段
+                if current_record.get("专业备注（选填）"):
+                    st.markdown("**专业备注（选填）：**")
+                    st.info(current_record.get("专业备注（选填）", ""))
                 
                 st.markdown("---")
                 st.markdown("### 招生计划中的候选记录")
