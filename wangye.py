@@ -1482,11 +1482,16 @@ with tab5:
                     st.session_state.current_record_idx = 0
                 st.session_state.selected_province = selected_province
             
-            # 根据省份筛选记录
+            # 根据省份筛选记录（确保保留所有字段，包括候选记录）
             if selected_province == "全部":
                 filtered_records = st.session_state.manual_fill_records
             else:
-                filtered_records = [r for r in st.session_state.manual_fill_records if r.get("省份", "") == selected_province]
+                # 使用列表推导式筛选，确保保留所有字段
+                filtered_records = []
+                for r in st.session_state.manual_fill_records:
+                    if r.get("省份", "") == selected_province:
+                        # 确保保留完整的记录，包括候选记录字段
+                        filtered_records.append(r)
             
             # 显示筛选后的统计信息
             with col2:
@@ -1508,6 +1513,21 @@ with tab5:
             current_record = filtered_records[st.session_state.current_record_idx]
             idx = current_record["索引"]
             key = f"manual_select_{idx}"
+            
+            # 确保从原始记录中获取完整的候选记录信息
+            # 如果筛选后的记录中候选记录丢失或为空，从原始记录中获取
+            candidate_records_from_filtered = current_record.get("候选记录")
+            if candidate_records_from_filtered is None or (isinstance(candidate_records_from_filtered, list) and len(candidate_records_from_filtered) == 0):
+                # 从原始记录中查找对应的记录
+                original_record = next((r for r in st.session_state.manual_fill_records if r.get("索引") == idx), None)
+                if original_record:
+                    original_candidates = original_record.get("候选记录")
+                    if original_candidates is not None:
+                        current_record["候选记录"] = original_candidates
+                    else:
+                        current_record["候选记录"] = []
+                else:
+                    current_record["候选记录"] = []
             
             # 显示进度
             if selected_province == "全部":
@@ -1543,7 +1563,11 @@ with tab5:
                 st.markdown("### 招生计划中的候选记录")
                 
                 # 显示候选记录
-                candidate_records = current_record.get("候选记录", [])
+                candidate_records = current_record.get("候选记录")
+                # 处理None、空列表等情况
+                if candidate_records is None:
+                    candidate_records = []
+                
                 if candidate_records and len(candidate_records) > 0:
                     # 显示候选记录的详细信息表格
                     st.markdown("**候选记录详情：**")
