@@ -924,45 +924,80 @@ rename_mapping_B = {
 
 
 def process_data(dfA, dfB):
-    dfB_renamed = dfB.rename(columns=rename_mapping_B)
+    dfB.rename(columns=rename_mapping_B, inplace=True)
 
-    # 构建组合键
+    # 构建组合键（不含备注）：学校-省份-层次-科类-批次-招生类型-专业
     key_fields = [f for f in tableA_fields if f != "专业备注（选填）"]
+    dfA["组合键"] = dfA[key_fields].fillna("").astype(str).apply(
+        lambda x: "|".join([str(i).strip() for i in x]), axis=1)
+    dfB["组合键"] = dfB[key_fields].fillna("").astype(str).apply(
+        lambda x: "|".join([str(i).strip() for i in x]), axis=1)
 
-    def get_key(df):
-        return df[key_fields].fillna("").astype(str).apply(
-            lambda x: "|".join([str(i).strip() for i in x]), axis=1)
-
-    dfA["组合键"] = get_key(dfA)
-    dfB_renamed["组合键"] = get_key(dfB_renamed)
-
-    # 预处理 B 表：组合键 -> 所有的专业组代码列表
-    b_dict = dfB_renamed.groupby("组合键")["专业组代码"].apply(lambda x: list(set(x.dropna()))).to_dict()
-
-    # 统计重复性
+    # 检查A表和B表中组合键的重复性
+    # 统计A表中每个组合键出现的次数
     a_key_counts = dfA["组合键"].value_counts()
+    # 统计B表中每个组合键出现的次数
+    b_key_counts = dfB["组合键"].value_counts()
 
-    def analyze_row(row):
+    # 找出A表中有重复的组合键（出现次数>1）
+    a_duplicate_keys = set(a_key_counts[a_key_counts > 1].index)
+    # 找出B表中有重复的组合键（出现次数>1）
+    b_duplicate_keys = set(b_key_counts[b_key_counts > 1].index)
+
+    # 构建B表字典：组合键 → 记录列表
+    b_dict = dfB.groupby("组合键").apply(lambda x: x.to_dict("records")).to_dict()
+
+    # 存储需要手动补充的记录信息
+    manual_fill_records = []
+
+    def get_code(row):
         key = row["组合键"]
         candidates = b_dict.get(key, [])
-        is_a_duplicate = a_key_counts[key] > 1
-        is_b_duplicate = len(candidates) > 1
 
-        # 逻辑判断
+        # 情况1：无候选记录
         if not candidates:
-            return "未找到", None, []
-        if not is_a_duplicate and not is_b_duplicate:
-            return "自动匹配", candidates[0], candidates
-        else:
-            return "需人工校验", None, candidates
+            return None, None
 
-    # 应用分析
-    analysis = dfA.apply(analyze_row, axis=1, result_type='expand')
-    dfA["匹配状态"] = analysis[0]
-    dfA["专业组代码"] = analysis[1]
-    dfA["候选列表"] = analysis[2]
+        # 检查该组合键在A表或B表中是否有重复
+        has_duplicate_in_a = key in a_duplicate_keys
+        has_duplicate_in_b = key in b_duplicate_keys
 
-    return dfA
+        # 如果A表或B表中任何一个有重复，需要手动补充
+        if has_duplicate_in_a or has_duplicate_in_b:
+            # 提取候选代码列表
+            candidate_codes = [c.get("专业组代码", "") for c in candidates if c.get("专业组代码")]
+            # 去重并过滤空值
+            candidate_codes = list(set([str(c).strip() for c in candidate_codes if c and str(c).strip()]))
+            return None, candidate_codes
+
+        # A表和B表中都没有重复，且B表中只有唯一候选记录，可以直接匹配
+        if len(candidates) == 1:
+            return candidates[0]["专业组代码"], None
+
+        # 如果B表中有多个候选记录（这种情况理论上不应该出现，因为B表没有重复），返回None
+        return None, None
+
+    # 应用匹配逻辑
+    results = dfA.apply(get_code, axis=1)
+    dfA["专业组代码"] = results.apply(lambda x: x[0] if x[0] is not None else "")
+    dfA["候选代码"] = results.apply(lambda x: "|".join(x[1]) if x[1] and len(x[1]) > 0 else "")
+
+    # 收集需要手动补充的记录
+    for idx, row in dfA.iterrows():
+        if row["候选代码"]:  # 有候选代码，说明需要手动补充
+            manual_fill_records.append({
+                "索引": idx,
+                "学校名称": row.get("学校名称", ""),
+                "省份": row.get("省份", ""),
+                "招生专业": row.get("招生专业", ""),
+                "一级层次": row.get("一级层次", ""),
+                "招生科类": row.get("招生科类", ""),
+                "招生批次": row.get("招生批次", ""),
+                "招生类型（选填）": row.get("招生类型（选填）", ""),
+                "候选代码": row["候选代码"].split("|") if row["候选代码"] else []
+            })
+
+    return dfA, manual_fill_records
 
 
 # ========== 就业质量报告图片提取 ==========
@@ -1329,82 +1364,236 @@ with tab4:
 
 # ====================== 专业组代码匹配 ======================
 with tab5:
-    st.header("专业组代码匹配与人工校验")
+    st.header("专业组代码匹配（需要检查！）")
 
-    # 初始化 Session State
-    if "final_df" not in st.session_state:
-        st.session_state.final_df = None
+    # 初始化session state
+    if 'match_result_df' not in st.session_state:
+        st.session_state.match_result_df = None
+    if 'manual_fill_records' not in st.session_state:
+        st.session_state.manual_fill_records = []
+    if 'manual_selections' not in st.session_state:
+        st.session_state.manual_selections = {}
+    if 'temp_fileA_path' not in st.session_state:
+        st.session_state.temp_fileA_path = None
+    if 'temp_fileB_path' not in st.session_state:
+        st.session_state.temp_fileB_path = None
 
-    uploaded_fileA = st.file_uploader("上传专业分导入模板", type=["xls", "xlsx"], key="match_fileA")
-    uploaded_fileB = st.file_uploader("上传招生计划数据导出文件", type=["xls", "xlsx"], key="match_fileB")
+    uploaded_fileA = st.file_uploader("上传专业分导入模板", type=["xls", "xlsx"], key="fileA")
+    uploaded_fileB = st.file_uploader("上传招生计划数据导出文件", type=["xls", "xlsx"], key="fileB")
 
     if uploaded_fileA and uploaded_fileB:
-        if st.button("第一步：执行自动匹配"):
-            dfA = pd.read_excel(uploaded_fileA, header=2)
-            dfB = pd.read_excel(uploaded_fileB)
+        st.success(f"已选择文件：{uploaded_fileA.name} 和 {uploaded_fileB.name}")
 
-            # 处理数据
-            processed_df = process_data(dfA, dfB)
-            st.session_state.final_df = processed_df
-            st.success("自动匹配完成，请在下方处理冲突项。")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        status_text.text("等待开始处理...")
 
-    # 如果已经有处理结果，显示人工校验界面
-    if st.session_state.final_df is not None:
-        df = st.session_state.final_df
+        if st.button("开始数据处理", key="start_match"):
+            try:
+                # 保存临时文件
+                temp_fileA = "tempA.xlsx"
+                temp_fileB = "tempB.xlsx"
+                with open(temp_fileA, "wb") as f:
+                    f.write(uploaded_fileA.getbuffer())
+                with open(temp_fileB, "wb") as f:
+                    f.write(uploaded_fileB.getbuffer())
 
-        # 分离出需要手动处理的数据
-        to_fix_mask = df["匹配状态"] != "自动匹配"
+                st.session_state.temp_fileA_path = temp_fileA
+                st.session_state.temp_fileB_path = temp_fileB
 
-        if to_fix_mask.any():
-            st.warning(f"发现 {to_fix_mask.sum()} 条记录存在冲突或未匹配，请手动选择：")
+                status_text.text("读取文件...")
+                progress_bar.progress(10)
 
-            # 准备全量代码库（用于无联想时的备选）
-            all_possible_codes = df["候选列表"].explode().dropna().unique().tolist()
+                dfA = pd.read_excel(temp_fileA, header=2)
+                dfB = pd.read_excel(temp_fileB)
 
-            # 使用 data_editor 进行交互
-            # 我们只允许编辑“专业组代码”列
-            edited_df = st.data_editor(
-                df,
-                column_config={
-                    "专业组代码": st.column_config.SelectboxColumn(
-                        "专业组代码 (手动更正)",
-                        help="根据 B 表联想到的代码进行选择",
-                        width="medium",
-                        options=all_possible_codes,  # 这里提供联想库
-                    ),
-                    "候选列表": st.column_config.ListColumn("系统联想候选"),
-                    "组合键": None,  # 隐藏
-                    "匹配状态": st.column_config.TextColumn("状态", disabled=True)
-                },
-                disabled=["学校名称", "招生专业", "招生科类", "匹配状态", "候选列表"],
-                hide_index=True,
-                key="editor"
-            )
+                status_text.text("开始处理数据...")
+                progress_bar.progress(30)
 
-            # 更新状态
-            if st.button("第二步：确认修改并准备下载"):
-                st.session_state.final_df = edited_df
-                st.success("修改已保存！")
-        else:
-            st.success("所有记录均已自动匹配成功！")
+                result_df, manual_fill_records = process_data(dfA, dfB)
 
-        # 导出部分
-        if st.button("第三步：导出最终 Excel"):
-            final_out = st.session_state.final_df.copy()
-            # 移除中间辅助列
-            cols_to_drop = ["组合键", "匹配状态", "候选列表"]
-            final_out = final_out.drop(columns=[c for c in cols_to_drop if c in final_out.columns])
+                st.session_state.match_result_df = result_df.copy()
+                st.session_state.manual_fill_records = manual_fill_records
+                st.session_state.manual_selections = {}
 
+                status_text.text("处理完成！")
+                progress_bar.progress(100)
+
+                # 显示统计信息
+                total_count = len(result_df)
+                matched_count = len(result_df[result_df["专业组代码"].notna() & (result_df["专业组代码"] != "")])
+                manual_count = len(manual_fill_records)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("总记录数", total_count)
+                with col2:
+                    st.metric("自动匹配成功", matched_count)
+                with col3:
+                    st.metric("需要手动补充", manual_count, delta=f"{manual_count}条")
+
+                if manual_count > 0:
+                    st.warning(f"⚠️ 发现 {manual_count} 条记录需要手动补充专业组代码")
+
+            except Exception as e:
+                st.error(f"处理错误：{e}")
+                import traceback
+                st.error(traceback.format_exc())
+
+        # 显示手动补充界面
+        if st.session_state.match_result_df is not None and len(st.session_state.manual_fill_records) > 0:
+            st.markdown("---")
+            st.subheader("📝 手动补充专业组代码")
+            st.info(f"以下 {len(st.session_state.manual_fill_records)} 条记录存在重复字段，请从备选代码中选择正确的专业组代码：")
+
+            # 分页显示
+            records_per_page = 10
+            total_pages = (len(st.session_state.manual_fill_records) + records_per_page - 1) // records_per_page
+            
+            if total_pages > 1:
+                page = st.number_input("页码", min_value=1, max_value=total_pages, value=1, key="manual_page")
+                start_idx = (page - 1) * records_per_page
+                end_idx = min(start_idx + records_per_page, len(st.session_state.manual_fill_records))
+                display_records = st.session_state.manual_fill_records[start_idx:end_idx]
+                st.caption(f"显示第 {start_idx + 1}-{end_idx} 条，共 {len(st.session_state.manual_fill_records)} 条")
+            else:
+                display_records = st.session_state.manual_fill_records
+
+            # 为每条记录创建选择框
+            for record in display_records:
+                idx = record["索引"]
+                key = f"manual_select_{idx}"
+                
+                # 构建显示信息
+                with st.container():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        info_text = f"**记录 {idx + 1}** | 学校：{record['学校名称']} | 省份：{record['省份']} | 专业：{record['招生专业']} | 层次：{record['一级层次']} | 科类：{record['招生科类']} | 批次：{record['招生批次']}"
+                        st.markdown(info_text)
+                    with col2:
+                        # 显示当前已选择的值（如果有）
+                        current_value = st.session_state.manual_selections.get(key, "")
+                        if current_value:
+                            st.success(f"已选择：{current_value}")
+                
+                # 候选代码列表
+                candidate_codes = record["候选代码"]
+                if candidate_codes and len(candidate_codes) > 0:
+                    # 添加"请选择"选项
+                    options = ["请选择"] + candidate_codes
+                    # 获取当前选择（如果有）
+                    current_selection = st.session_state.manual_selections.get(key, "请选择")
+                    default_index = 0
+                    if current_selection in options:
+                        default_index = options.index(current_selection)
+                    
+                    selected = st.selectbox(
+                        f"选择专业组代码（记录 {idx + 1}）",
+                        options,
+                        index=default_index,
+                        key=key
+                    )
+                    
+                    if selected != "请选择":
+                        st.session_state.manual_selections[key] = selected
+                    else:
+                        # 如果用户选择了"请选择"，清除之前的选择
+                        if key in st.session_state.manual_selections:
+                            del st.session_state.manual_selections[key]
+                    
+                    # 显示候选代码提示
+                    st.caption(f"💡 备选代码：{', '.join(candidate_codes)}")
+                else:
+                    st.warning("⚠️ 该记录没有候选代码，请手动输入")
+                    input_key = f"{key}_input"
+                    # 从session_state读取之前的值（如果有）
+                    prev_value = st.session_state.get(input_key, "")
+                    manual_input = st.text_input(
+                        f"手动输入专业组代码（记录 {idx + 1}）",
+                        value=prev_value,
+                        key=input_key
+                    )
+                    # 将输入值保存到manual_selections中
+                    if manual_input and manual_input.strip():
+                        st.session_state.manual_selections[key] = manual_input.strip()
+                    elif key in st.session_state.manual_selections:
+                        # 如果输入框被清空，也清除选择
+                        del st.session_state.manual_selections[key]
+                
+                st.markdown("---")
+
+            # 应用手动选择
+            if st.button("✅ 应用手动选择", type="primary", use_container_width=True):
+                # 更新结果数据框
+                updated_df = st.session_state.match_result_df.copy()
+                applied_count = 0
+                
+                for record in st.session_state.manual_fill_records:
+                    idx = record["索引"]
+                    key = f"manual_select_{idx}"
+                    input_key = f"{key}_input"
+                    
+                    # 检查是否有选择
+                    selected_code = None
+                    
+                    # 先检查selectbox的选择（从manual_selections或session_state）
+                    if key in st.session_state.manual_selections:
+                        selected_code = st.session_state.manual_selections[key]
+                        if selected_code == "请选择":
+                            selected_code = None
+                    elif key in st.session_state:
+                        selected_code = st.session_state[key]
+                        if selected_code == "请选择":
+                            selected_code = None
+                    
+                    # 如果没有selectbox选择，检查text_input（从session_state）
+                    if not selected_code and input_key in st.session_state:
+                        input_value = st.session_state[input_key]
+                        if input_value and input_value.strip():
+                            selected_code = input_value.strip()
+                    
+                    # 应用选择
+                    if selected_code and selected_code.strip():
+                        updated_df.at[idx, "专业组代码"] = selected_code.strip()
+                        applied_count += 1
+
+                st.session_state.match_result_df = updated_df
+                if applied_count > 0:
+                    st.success(f"✅ 已应用 {applied_count} 条记录的手动选择！")
+                else:
+                    st.warning("⚠️ 没有应用任何选择，请先选择专业组代码")
+                st.rerun()
+
+        # 导出结果
+        if st.session_state.match_result_df is not None:
+            st.markdown("---")
+            st.subheader("📥 导出结果")
+            
+            # 移除临时列
+            export_df = st.session_state.match_result_df.drop(columns=["组合键", "候选代码"], errors='ignore')
+            
+            # 导出结果到内存
             output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                final_out.to_excel(writer, index=False)
+            export_df.to_excel(output, index=False)
+            output.seek(0)
 
-            st.download_button(
-                label="📥 点击下载匹配结果",
-                data=output.getvalue(),
-                file_name="专业组代码匹配_最终版.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            b64 = base64.b64encode(output.read()).decode()
+            href = f'<a href="data:application/octet-stream;base64,{b64}" download="专业组代码匹配结果.xlsx">点击下载匹配结果</a>'
+            st.markdown(href, unsafe_allow_html=True)
+
+            # 清理临时文件按钮
+            if st.button("清理临时文件", key="cleanup_temp"):
+                if st.session_state.temp_fileA_path and os.path.exists(st.session_state.temp_fileA_path):
+                    os.remove(st.session_state.temp_fileA_path)
+                if st.session_state.temp_fileB_path and os.path.exists(st.session_state.temp_fileB_path):
+                    os.remove(st.session_state.temp_fileB_path)
+                st.session_state.temp_fileA_path = None
+                st.session_state.temp_fileB_path = None
+                st.success("临时文件已清理")
+
+    else:
+        st.info("请先上传两个Excel文件")
+
 # ====================== tab5：网页图片提取PDF ======================
 with tab6:
     st.header("就业质量报告图片提取")
