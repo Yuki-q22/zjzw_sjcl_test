@@ -954,10 +954,6 @@ def process_data(dfA, dfB):
         key = row["组合键"]
         candidates = b_dict.get(key, [])
 
-        # 情况1：无候选记录
-        if not candidates:
-            return None, None
-
         # 检查该组合键在A表或B表中是否有重复
         has_duplicate_in_a = key in a_duplicate_keys
         has_duplicate_in_b = key in b_duplicate_keys
@@ -965,25 +961,29 @@ def process_data(dfA, dfB):
         # 如果A表或B表中任何一个有重复，需要手动补充
         if has_duplicate_in_a or has_duplicate_in_b:
             # 返回完整的候选记录列表（包含所有字段信息）
-            return None, candidates
+            return None, candidates if candidates else []
 
         # A表和B表中都没有重复，且B表中只有唯一候选记录，可以直接匹配
         if len(candidates) == 1:
             return candidates[0]["专业组代码"], None
 
-        # 如果B表中有多个候选记录（这种情况理论上不应该出现，因为B表没有重复），返回None
-        return None, None
+        # 其他情况（无候选记录或多个候选记录）都需要手动补充
+        # 返回None和候选记录列表（可能为空）
+        return None, candidates if candidates else []
 
     # 应用匹配逻辑
     results = dfA.apply(get_code, axis=1)
     dfA["专业组代码"] = results.apply(lambda x: x[0] if x[0] is not None else "")
     
     # 收集需要手动补充的记录（包含完整的候选记录信息）
+    # 只要专业组代码没匹配到的，都需要手动选择
     for idx, row in dfA.iterrows():
         result = results.iloc[idx]
+        matched_code = result[0]  # 匹配到的专业组代码
         candidates = result[1] if result[1] is not None else []
         
-        if candidates:  # 有候选记录，说明需要手动补充
+        # 如果专业组代码为空（没有匹配到），需要手动补充
+        if not matched_code or matched_code == "":
             # 提取候选记录的详细信息
             candidate_records = []
             for candidate in candidates:
@@ -1009,7 +1009,7 @@ def process_data(dfA, dfB):
                 "招生批次": row.get("招生批次", ""),
                 "招生类型（选填）": row.get("招生类型（选填）", ""),
                 "专业备注（选填）": row.get("专业备注（选填）", ""),  # A表的专业备注字段
-                "候选记录": candidate_records  # 完整的候选记录列表
+                "候选记录": candidate_records  # 完整的候选记录列表（可能为空）
             })
 
     return dfA, manual_fill_records
@@ -1460,17 +1460,60 @@ with tab5:
             st.markdown("---")
             st.subheader("📝 手动补充专业组代码")
             
-            # 初始化当前处理的记录索引
+            # 省份筛选功能
+            all_provinces = sorted(set([r.get("省份", "") for r in st.session_state.manual_fill_records if r.get("省份", "")]))
+            all_provinces = [p for p in all_provinces if p]  # 过滤空值
+            
+            # 初始化省份筛选
+            if 'selected_province' not in st.session_state:
+                st.session_state.selected_province = "全部"
+            
+            # 省份筛选框
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                selected_province = st.selectbox(
+                    "筛选省份",
+                    ["全部"] + all_provinces,
+                    index=0 if st.session_state.selected_province == "全部" else (all_provinces.index(st.session_state.selected_province) + 1 if st.session_state.selected_province in all_provinces else 0),
+                    key="province_filter"
+                )
+                # 如果省份筛选改变，重置当前索引
+                if selected_province != st.session_state.selected_province:
+                    st.session_state.current_record_idx = 0
+                st.session_state.selected_province = selected_province
+            
+            # 根据省份筛选记录
+            if selected_province == "全部":
+                filtered_records = st.session_state.manual_fill_records
+            else:
+                filtered_records = [r for r in st.session_state.manual_fill_records if r.get("省份", "") == selected_province]
+            
+            # 显示筛选后的统计信息
+            with col2:
+                st.info(f"**筛选结果：** 共 {len(filtered_records)} 条记录需要手动补充（总记录数：{len(st.session_state.manual_fill_records)}）")
+            
+            if len(filtered_records) == 0:
+                st.warning(f"⚠️ 省份「{selected_province}」没有需要手动补充的记录")
+                st.stop()
+            
+            # 初始化当前处理的记录索引（基于筛选后的记录）
             if 'current_record_idx' not in st.session_state:
                 st.session_state.current_record_idx = 0
             
-            total_records = len(st.session_state.manual_fill_records)
-            current_record = st.session_state.manual_fill_records[st.session_state.current_record_idx]
+            # 如果当前索引超出筛选后的记录范围，重置为0
+            if st.session_state.current_record_idx >= len(filtered_records):
+                st.session_state.current_record_idx = 0
+            
+            total_records = len(filtered_records)
+            current_record = filtered_records[st.session_state.current_record_idx]
             idx = current_record["索引"]
             key = f"manual_select_{idx}"
             
             # 显示进度
-            progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}"
+            if selected_province == "全部":
+                progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}"
+            else:
+                progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}（省份：{selected_province}）"
             st.progress((st.session_state.current_record_idx + 1) / total_records, text=progress_text)
             
             # 弹框形式显示当前记录
