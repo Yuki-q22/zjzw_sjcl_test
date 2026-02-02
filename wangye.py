@@ -125,33 +125,81 @@ def _get_first_subject(category):
     return ''
 
 
+# 学业桥上传文件从第一行（标题行）开始校验，必须包含以下字段
+XUEYEQIAO_UPLOAD_COLUMNS = [
+    '数据类型', '年份', '省份', '批次', '科类', '院校名称', '院校原始名称', '招生代码', '专业组编号',
+    '专业代码', '招生类型', '专业名称', '报考要求', '专业备注', '招生计划人数', '最低分', '最低位次',
+    '最高分', '平均分', '录取人数'
+]
+
+# 学业桥导出文件第3行标题列（与上传字段映射后的导出格式）
+XUEYEQIAO_EXPORT_HEADERS = [
+    '学校名称', '省份', '招生专业', '专业方向（选填）', '专业备注（选填）', '一级层次', '招生科类', '招生批次',
+    '招生类型（选填）', '最高分', '最低分', '平均分', '最低分位次（选填）', '招生人数（选填）', '数据来源',
+    '专业组代码', '首选科目', '选科要求', '次选科目', '专业代码', '招生代码',
+    '最低分数区间低', '最低分数区间高', '最低分数区间位次低', '最低分数区间位次高', '录取人数（选填）'
+]
+
+# 学业桥导出文件第1行合并单元格备注内容（A1-U1，行高220磅）
+XUEYEQIAO_EXPORT_NOTE = (
+    '备注：请删除示例后再填写；\n'
+    '1.省份：必须填写各省份简称，例如：北京、内蒙古，不能带有市、省、自治区、空格、特殊字符等\n'
+    '2.科类：浙江、上海限定"综合、艺术类、体育类"，内蒙古限定"文科、理科、蒙授文科、蒙授理科、艺术类、艺术文、艺术理、体育类、体育文、体育理、蒙授艺术、蒙授体育"，其他省份限定"文科、理科、艺术类、艺术文、艺术理、体育类、体育文、体育理"\n'
+    '3.批次：（以下为19年使用批次）\n'
+    '河北、内蒙古、吉林、江苏、安徽、福建、江西、河南、湖北、广西、重庆、四川、贵州、云南、西藏、陕西、甘肃、宁夏、新疆限定本科提前批、本科一批、本科二批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；\n'
+    '黑龙江、湖南、青海限定本科提前批、本科一批、本科二批、本科三批、专科提前批、专科批、国家专项计划本科批、地方专项计划本科批；\n'
+    '山西限定本科一批A段、本科一批B段、本科二批A段、本科二批B段、本科二批C段、专科批、国家专项计划本科批、地方专项计划本科批；\n'
+    '浙江限定普通类提前批、平行录取一段、平行录取二段、平行录取三段\n'
+    '4.招生人数：仅能填写数字\n'
+    '5.最高分、最低分、平均分：仅能填写数字，保留小数后两位，且三者顺序不能改变，最低分为必填项，其中艺术类和体育类分数为文化课分数\n'
+    '6.一级层次：限定"本科、专科（高职）"，该部分为招生专业对应的专业层次\n'
+    '7.最低分位次：仅能填写数字;\n'
+    '8.数据来源：必须限定——官方考试院、大红本数据、学校官网、销售、抓取、圣达信、优志愿、学业桥\n'
+    '9.选科要求：不限科目专业组;多门选考;单科、多科均需选考\n'
+    '10.选科科目必须是科目的简写（物、化、生、历、地、政、技）\n'
+    '11.2020北京、海南，17-19上海仅限制本科专业组代码必填\n'
+    '12.新八省首选科目必须选择（物理或历史）\n'
+    '13.分数区间仅限北京'
+)
+
+
 def map_upload_row_to_export(row):
     """
-    将上传文件的一行（院校名称、专业名称、科类、批次、报考要求等）映射为导出文件格式。
-    依据 docx 字段映射：学校名称←院校名称，招生专业←专业名称，招生科类←科类，等；
-    选科要求、次选科目由报考要求经 convert_selection_requirement_from_requirement 转换。
+    将上传文件的一行映射为导出文件格式。
+    字段映射：学校名称←院校名称，招生专业←专业名称，招生科类←科类，专业组代码←专业组编号等；
+    首选科目由科类经 _get_first_subject 得到；选科要求、次选科目由报考要求经 convert_selection_requirement_from_requirement 转换。
     """
     new_row = {}
-    new_row['学校名称'] = row.get('院校名称', '') or row.get('学校名称', '') or ''
+    new_row['学校名称'] = row.get('院校名称', '') or ''
     new_row['省份'] = row.get('省份', '') or ''
-    new_row['招生专业'] = row.get('专业名称', '') or row.get('招生专业', '') or ''
-    new_row['招生科类'] = row.get('科类', '') or row.get('招生科类', '') or ''
-    new_row['招生批次'] = row.get('批次', '') or row.get('招生批次', '') or ''
-    new_row['招生类型（选填）'] = row.get('招生类型', '') or row.get('招生类型（选填）', '') or ''
-    new_row['专业备注（选填）'] = row.get('专业备注', '') or row.get('专业备注（选填）', '') or ''
-    new_row['招生人数（选填）'] = row.get('招生计划人数', '') or row.get('招生人数（选填）', '') or ''
-    new_row['录取人数（选填）'] = row.get('录取人数', '') or row.get('录取人数（选填）', '') or ''
-    new_row['招生代码'] = _to_text(row.get('招生代码', ''))
-    new_row['专业代码'] = _to_text(row.get('专业代码', ''))
-    new_row['最低分'] = row.get('最低分', '') or ''
+    new_row['招生专业'] = row.get('专业名称', '') or ''
+    new_row['专业方向（选填）'] = row.get('专业方向（选填）', '') or ''
+    # 若有 process_chunk 产生的修改后备注则优先使用
+    new_row['专业备注（选填）'] = row.get('修改后备注', '') or row.get('专业备注', '') or ''
+    new_row['一级层次'] = row.get('一级层次', '') or ''
+    new_row['招生科类'] = row.get('科类', '') or ''
+    new_row['招生批次'] = row.get('批次', '') or ''
+    new_row['招生类型（选填）'] = row.get('招生类型', '') or ''
     new_row['最高分'] = row.get('最高分', '') or ''
+    new_row['最低分'] = row.get('最低分', '') or ''
     new_row['平均分'] = row.get('平均分', '') or ''
-    req = row.get('报考要求', '') or row.get('选科要求', '')
-    sel_desc, second = convert_selection_requirement_from_requirement(req)
-    new_row['选科要求说明'] = sel_desc
-    new_row['次选'] = second
-    cat = row.get('科类', '') or row.get('招生科类', '')
+    new_row['最低分位次（选填）'] = row.get('最低位次', '') or ''
+    new_row['招生人数（选填）'] = row.get('招生计划人数', '') or ''
+    new_row['数据来源'] = row.get('数据来源', '') or ''
+    new_row['专业组代码'] = _to_text(row.get('专业组编号', '') or row.get('专业组代码', ''))
+    cat = row.get('科类', '') or ''
     new_row['首选科目'] = _get_first_subject(cat)
+    req = row.get('报考要求', '') or ''
+    sel_desc, second = convert_selection_requirement_from_requirement(req)
+    new_row['选科要求'] = sel_desc
+    new_row['次选科目'] = second
+    new_row['专业代码'] = _to_text(row.get('专业代码', ''))
+    new_row['招生代码'] = _to_text(row.get('招生代码', ''))
+    new_row['最低分数区间低'] = row.get('最低分数区间低', '') or ''
+    new_row['最低分数区间高'] = row.get('最低分数区间高', '') or ''
+    new_row['最低分数区间位次低'] = row.get('最低分数区间位次低', '') or ''
+    new_row['最低分数区间位次高'] = row.get('最低分数区间位次高', '') or ''
+    new_row['录取人数（选填）'] = row.get('录取人数', '') or ''
     return new_row
 
 
@@ -668,35 +716,24 @@ def _find_remark_column(df):
 
 
 def process_remarks_file(file_path, progress_callback=None):
+    """学业桥数据处理：上传文件第1行为标题，校验指定列；校对学校/专业/备注后按新格式导出。"""
     try:
-        # 先按第3行作表头读取（与模板一致）
-        df = pd.read_excel(file_path, header=2, dtype={
-            '专业组代码': str,
-            '专业代码': str,
+        # 上传文件从第一行（标题行）开始读取
+        df = pd.read_excel(file_path, header=0, dtype={
             '招生代码': str,
-        }, engine='openpyxl')
+            '专业组编号': str,
+            '专业代码': str,
+        }, engine='openpyxl', keep_default_na=False)
     except Exception as e:
         raise Exception(f"读取文件错误：{e}")
-    # 若未找到专业备注列，尝试第1行作表头（上传文件可能表头在第1行）
-    if _find_remark_column(df) is None:
-        try:
-            df0 = pd.read_excel(file_path, header=0, dtype={
-                '专业组代码': str,
-                '专业代码': str,
-                '招生代码': str,
-            }, engine='openpyxl')
-            if _find_remark_column(df0) is not None:
-                df = df0
-        except Exception:
-            pass
-    for col in ['专业组代码', '专业代码', '招生代码']:
+    # 校验必须包含的列（学业桥上传格式）
+    missing = [c for c in XUEYEQIAO_UPLOAD_COLUMNS if c not in df.columns]
+    if missing:
+        raise Exception("上传文件缺少以下列（应从第1行标题开始）：%s。当前列名：%s" % (missing, list(df.columns)))
+    for col in ['招生代码', '专业组编号', '专业代码']:
         if col in df.columns:
             df[col] = df[col].astype(str)
-    target_col = _find_remark_column(df)
-    if not target_col:
-        raise Exception("未找到'专业备注'相关列。上传文件列可为“专业备注”，新文件列可为“专业备注（选填）”。当前列名：%s" % list(df.columns))
-    if str(target_col).strip() != '专业备注':
-        df = df.rename(columns={target_col: '专业备注'})
+    # 专业备注列已在上传列中，无需再查找或重命名
     chunks = []
     for i in range(0, len(df), 1000):
         chunks.append(df.iloc[i:i + 1000].copy())
@@ -711,24 +748,74 @@ def process_remarks_file(file_path, progress_callback=None):
                 progress_callback(count + 1, total_chunks)
     ordered_results = [results[i] for i in sorted(results.keys())]
     final_result = pd.concat(ordered_results)
+    # 从上传数据取招生年份（年份列第一个非空值）
+    year_value = ''
+    if '年份' in final_result.columns:
+        for v in final_result['年份']:
+            if pd.notna(v) and str(v).strip():
+                year_value = str(v).strip()
+                break
+    # 将每一行映射为导出格式（含 process_chunk 产生的修改后备注等）
+    export_rows = []
+    for _, row in final_result.iterrows():
+        export_rows.append(map_upload_row_to_export(row.to_dict()))
+    export_df = pd.DataFrame(export_rows, columns=XUEYEQIAO_EXPORT_HEADERS)
+    # 最高分、最低分、平均分：仅数字保留小数后两位
+    def _format_score(x):
+        if x is None or (isinstance(x, str) and not x.strip()):
+            return ''
+        s = str(x).strip()
+        if not s or not _is_numeric_str(s):
+            return s
+        return '%.2f' % float(s)
+    for col in ['最高分', '最低分', '平均分']:
+        if col in export_df.columns:
+            export_df[col] = export_df[col].apply(_format_score)
     output_path = file_path.replace('.xlsx', '_检查结果.xlsx')
     try:
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            final_result.to_excel(writer, index=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Sheet1']
-            # 保持指定列从第三行开始文本格式
-            for col in ['专业组代码', '专业代码', '招生代码']:
-                if col in final_result.columns:
-                    col_idx = final_result.columns.get_loc(col) + 1  # 转换为Excel列号（A=1）
-                    # 从第三行开始设置格式（Excel行号为3，对应Python的索引为2）
-                    for row in range(3, len(final_result) + 2):  # 工作表行号从3开始（索引2）
-                        cell = worksheet.cell(row=row, column=col_idx)
-                        cell.value = final_result.iloc[row - 3][col]  # 数据从第三行开始填充
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Sheet1'
+        # 第1行：A1-U1 合并，行高 220 磅，备注内容
+        ws.merge_cells('A1:U1')
+        ws['A1'] = XUEYEQIAO_EXPORT_NOTE
+        ws['A1'].alignment = Alignment(wrap_text=True, vertical='top', horizontal='left')
+        ws.row_dimensions[1].height = 220
+        # 第2行：A2=招生年份，B2=年份
+        ws['A2'] = '招生年份'
+        ws['B2'] = year_value
+        # 第3行：标题行
+        for col_idx, col_name in enumerate(XUEYEQIAO_EXPORT_HEADERS, start=1):
+            ws.cell(row=3, column=col_idx, value=col_name)
+        # 第4行起：数据
+        for row_idx, (_, row_data) in enumerate(export_df.iterrows(), start=4):
+            for col_idx, col_name in enumerate(XUEYEQIAO_EXPORT_HEADERS, start=1):
+                val = row_data.get(col_name)
+                if pd.isna(val):
+                    val = ''
+                ws.cell(row=row_idx, column=col_idx, value=val)
+        # 专业组代码、专业代码、招生代码等列为文本格式
+        text_cols = ['专业组代码', '专业代码', '招生代码', '最低分位次（选填）', '招生人数（选填）', '最低分数区间低', '最低分数区间高', '最低分数区间位次低', '最低分数区间位次高', '录取人数（选填）']
+        for col_name in text_cols:
+            if col_name in XUEYEQIAO_EXPORT_HEADERS:
+                col_idx = XUEYEQIAO_EXPORT_HEADERS.index(col_name) + 1
+                for r in range(4, len(export_df) + 4):
+                    cell = ws.cell(row=r, column=col_idx)
+                    if cell.value is not None and str(cell.value).strip() != '':
                         cell.number_format = numbers.FORMAT_TEXT
+        wb.save(output_path)
     except Exception as e:
         raise Exception(f"保存文件错误：{e}")
     return output_path
+
+
+def _is_numeric_str(s):
+    """判断字符串是否为数字（含小数）"""
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 # ============================
