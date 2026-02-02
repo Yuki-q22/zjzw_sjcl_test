@@ -125,6 +125,47 @@ def _get_first_subject(category):
     return ''
 
 
+def _normalize_kele(kele):
+    """转换招生科类：物理→物理类，历史→历史类，其他科类直接返回。"""
+    if kele is None or (isinstance(kele, str) and not kele.strip()):
+        return ''
+    k = str(kele).strip()
+    if k == '物理':
+        return '物理类'
+    if k == '历史':
+        return '历史类'
+    return k
+
+
+# 专业组代码按省份转换：无专业组 / 招生代码+专业组名 / 招生代码=专业组代码 / 招生代码+（专业组名）
+PROVINCE_NO_GROUP = {'河北', '辽宁', '山东', '浙江', '重庆', '贵州', '青海', '新疆', '西藏'}
+PROVINCE_CODE_PLUS_GROUP = {'海南', '吉林'}   # 招生代码+专业组名，如 320401、0200001
+PROVINCE_CODE_EQUALS_GROUP = {'湖北', '江苏', '上海', '天津'}  # 招生代码=专业组代码，如 320401
+
+
+def _convert_group_code_by_province(province, zhaosheng_code, group_no):
+    """
+    按省份转换专业组代码。
+    1. 河北、辽宁、山东、浙江、重庆、贵州、青海、新疆、西藏：无专业组代码，返回空
+    2. 海南、吉林：招生代码+专业组名（如 320401、0200001）
+    3. 湖北、江苏、上海、天津：招生代码=专业组代码（如 320401）
+    4. 其余省份：招生代码+（专业组名）（如 3204（01）、0200（001））
+    """
+    p = (province or '').strip()
+    code = _to_text(zhaosheng_code or '')
+    group = _to_text(group_no or '')
+    if p in PROVINCE_NO_GROUP:
+        return ''
+    if p in PROVINCE_CODE_PLUS_GROUP:
+        return (code or '') + (group or '')
+    if p in PROVINCE_CODE_EQUALS_GROUP:
+        return code or ''
+    # 其余省份：招生代码+（专业组名）
+    if not group:
+        return code or ''
+    return (code or '') + '（' + group + '）'
+
+
 # 学业桥上传文件从第一行（标题行）开始校验，必须包含以下字段
 XUEYEQIAO_UPLOAD_COLUMNS = [
     '数据类型', '年份', '省份', '批次', '科类', '院校名称', '院校原始名称', '招生代码', '专业组编号',
@@ -177,7 +218,9 @@ def map_upload_row_to_export(row):
     # 若有 process_chunk 产生的修改后备注则优先使用
     new_row['专业备注（选填）'] = row.get('修改后备注', '') or row.get('专业备注', '') or ''
     new_row['一级层次'] = row.get('一级层次', '') or ''
-    new_row['招生科类'] = row.get('科类', '') or ''
+    # 招生科类：物理→物理类，历史→历史类，其他直接转换
+    kele_raw = row.get('科类', '') or ''
+    new_row['招生科类'] = _normalize_kele(kele_raw)
     new_row['招生批次'] = row.get('批次', '') or ''
     new_row['招生类型（选填）'] = row.get('招生类型', '') or ''
     new_row['最高分'] = row.get('最高分', '') or ''
@@ -186,7 +229,11 @@ def map_upload_row_to_export(row):
     new_row['最低分位次（选填）'] = row.get('最低位次', '') or ''
     new_row['招生人数（选填）'] = row.get('招生计划人数', '') or ''
     new_row['数据来源'] = row.get('数据来源', '') or ''
-    new_row['专业组代码'] = _to_text(row.get('专业组编号', '') or row.get('专业组代码', ''))
+    # 专业组代码按省份转换
+    province = row.get('省份', '') or ''
+    zhaosheng_code = row.get('招生代码', '') or ''
+    group_no = row.get('专业组编号', '') or row.get('专业组代码', '')
+    new_row['专业组代码'] = _convert_group_code_by_province(province, zhaosheng_code, group_no)
     cat = row.get('科类', '') or ''
     new_row['首选科目'] = _get_first_subject(cat)
     req = row.get('报考要求', '') or ''
