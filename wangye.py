@@ -656,9 +656,20 @@ def process_score_file(file_path):
 # ============================
 # 保持文本格式
 # ============================
+def _find_remark_column(df):
+    """在 DataFrame 中查找专业备注相关列（上传多为“专业备注”，新文件多为“专业备注（选填）”）"""
+    for col in df.columns:
+        c = str(col).strip() if col is not None else ""
+        if not c:
+            continue
+        if c in ("专业备注", "专业备注（选填）") or "专业备注" in c:
+            return col
+    return None
+
+
 def process_remarks_file(file_path, progress_callback=None):
     try:
-        # 读取文件时，确保这些字段始终以字符串格式读取
+        # 先按第3行作表头读取（与模板一致）
         df = pd.read_excel(file_path, header=2, dtype={
             '专业组代码': str,
             '专业代码': str,
@@ -666,17 +677,25 @@ def process_remarks_file(file_path, progress_callback=None):
         }, engine='openpyxl')
     except Exception as e:
         raise Exception(f"读取文件错误：{e}")
+    # 若未找到专业备注列，尝试第1行作表头（上传文件可能表头在第1行）
+    if _find_remark_column(df) is None:
+        try:
+            df0 = pd.read_excel(file_path, header=0, dtype={
+                '专业组代码': str,
+                '专业代码': str,
+                '招生代码': str,
+            }, engine='openpyxl')
+            if _find_remark_column(df0) is not None:
+                df = df0
+        except Exception:
+            pass
     for col in ['专业组代码', '专业代码', '招生代码']:
         if col in df.columns:
             df[col] = df[col].astype(str)
-    target_col = None
-    for col in df.columns:
-        if "专业备注" in str(col):
-            target_col = col
-            break
+    target_col = _find_remark_column(df)
     if not target_col:
-        raise Exception("未找到'专业备注'相关列")
-    if target_col != '专业备注':
+        raise Exception("未找到'专业备注'相关列。上传文件列可为“专业备注”，新文件列可为“专业备注（选填）”。当前列名：%s" % list(df.columns))
+    if str(target_col).strip() != '专业备注':
         df = df.rename(columns={target_col: '专业备注'})
     chunks = []
     for i in range(0, len(df), 1000):
