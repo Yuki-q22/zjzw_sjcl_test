@@ -83,6 +83,78 @@ def check_major_combo(major, level):
     return "匹配" if combo in VALID_MAJOR_COMBOS else "不匹配"
 
 
+def convert_selection_requirement_from_requirement(req):
+    """
+    依据上传文件中的报考要求转换为选科要求说明与次选科目（与 docx 规范一致）。
+    1. 报考要求：不限 → 选科要求说明：不限科目专业组，次选科目：空白
+    2. 报考要求仅为单个字（如"化""政"）→ 选科要求说明：单科、多科均需选考，次选科目=报考要求
+    3. 报考要求中包含"且"（如"物且化"、"物且化且生"）→ 选科要求说明：单科、多科均需选考，次选科目为去掉"且"
+    4. 报考要求中包含"或"（如"物或化"、"物或化或生"）→ 选科要求说明：多门选考，次选科目为去掉"或"
+    """
+    if pd.isna(req) or not str(req).strip():
+        return "不限科目专业组", ""
+    s = str(req).strip()
+    if "不限" in s:
+        return "不限科目专业组", ""
+    if len(s) == 1:
+        return "单科、多科均需选考", s
+    if "且" in s:
+        return "单科、多科均需选考", s.replace("且", "")
+    if "或" in s:
+        return "多门选考", s.replace("或", "")
+    return "", ""
+
+
+def _to_text(value):
+    """转换为文本格式（学业桥工具用）"""
+    if value is None or (value != 0 and not value):
+        return ''
+    text = str(value).lstrip('^').strip().lstrip("'")
+    return text
+
+
+def _get_first_subject(category):
+    """根据科类取首选科目（学业桥工具用）"""
+    if not category:
+        return ''
+    c = str(category)
+    if '物理类' in c or '物理' in c:
+        return '物'
+    if '历史类' in c or '历史' in c:
+        return '历'
+    return ''
+
+
+def map_upload_row_to_export(row):
+    """
+    将上传文件的一行（院校名称、专业名称、科类、批次、报考要求等）映射为导出文件格式。
+    依据 docx 字段映射：学校名称←院校名称，招生专业←专业名称，招生科类←科类，等；
+    选科要求、次选科目由报考要求经 convert_selection_requirement_from_requirement 转换。
+    """
+    new_row = {}
+    new_row['学校名称'] = row.get('院校名称', '') or row.get('学校名称', '') or ''
+    new_row['省份'] = row.get('省份', '') or ''
+    new_row['招生专业'] = row.get('专业名称', '') or row.get('招生专业', '') or ''
+    new_row['招生科类'] = row.get('科类', '') or row.get('招生科类', '') or ''
+    new_row['招生批次'] = row.get('批次', '') or row.get('招生批次', '') or ''
+    new_row['招生类型（选填）'] = row.get('招生类型', '') or row.get('招生类型（选填）', '') or ''
+    new_row['专业备注（选填）'] = row.get('专业备注', '') or row.get('专业备注（选填）', '') or ''
+    new_row['招生人数（选填）'] = row.get('招生计划人数', '') or row.get('招生人数（选填）', '') or ''
+    new_row['录取人数（选填）'] = row.get('录取人数', '') or row.get('录取人数（选填）', '') or ''
+    new_row['招生代码'] = _to_text(row.get('招生代码', ''))
+    new_row['专业代码'] = _to_text(row.get('专业代码', ''))
+    new_row['最低分'] = row.get('最低分', '') or ''
+    new_row['最高分'] = row.get('最高分', '') or ''
+    new_row['平均分'] = row.get('平均分', '') or ''
+    req = row.get('报考要求', '') or row.get('选科要求', '')
+    sel_desc, second = convert_selection_requirement_from_requirement(req)
+    new_row['选科要求说明'] = sel_desc
+    new_row['次选'] = second
+    cat = row.get('科类', '') or row.get('招生科类', '')
+    new_row['首选科目'] = _get_first_subject(cat)
+    return new_row
+
+
 CUSTOM_WHITELIST = {
     "宏福校区", "沙河校区", "中外合作办学", "珠海校区", "江北校区", "津南校区", "开封校区",
     "联合办学", "校企合作", "合作办学", "威海校区", "深圳校区", "苏州校区", "平果校区",
@@ -261,25 +333,36 @@ def analyze_and_fix(text):
 
 
 def process_chunk(chunk):
-    """处理数据块"""
-    # 学校名称检查
-    if '学校名称' in chunk.columns:
-        chunk['学校匹配结果'] = chunk['学校名称'].apply(check_school_name)
+    """
+    处理数据块。支持上传文件列名与导出列名并存：
+    学校名称/院校名称、招生专业/专业名称、招生科类/科类、选科要求/报考要求。
+    选科转换逻辑与 docx 一致：不限/单字/且/或 → 选科要求说明、次选。
+    """
+    # 学校名称检查（支持 学校名称 或 院校名称）
+    school_col = '学校名称' if '学校名称' in chunk.columns else ('院校名称' if '院校名称' in chunk.columns else None)
+    if school_col:
+        chunk['学校匹配结果'] = chunk[school_col].apply(check_school_name)
 
-    # 专业匹配检查
-    if '招生专业' in chunk.columns and '一级层次' in chunk.columns:
+    # 专业匹配检查（支持 招生专业 或 专业名称，需有一级层次）
+    major_col = '招生专业' if '招生专业' in chunk.columns else ('专业名称' if '专业名称' in chunk.columns else None)
+    if major_col and '一级层次' in chunk.columns:
         chunk['招生专业匹配结果'] = chunk.apply(
-            lambda r: check_major_combo(r['招生专业'], r['一级层次']), axis=1)
+            lambda r: check_major_combo(r[major_col], r['一级层次']), axis=1)
 
-    # 备注处理 - 修改这部分
-    if '专业备注' in chunk.columns:
+    # 备注处理（支持 专业备注）
+    remark_col = None
+    for c in chunk.columns:
+        if '专业备注' in str(c):
+            remark_col = c
+            break
+    if remark_col is not None:
         def process_remark(remark):
             if pd.isna(remark) or not str(remark).strip():
                 return '无问题', ''
             fixed_text, issues = analyze_and_fix(remark)
             return '；'.join(issues) if issues else '无问题', fixed_text
 
-        chunk[['备注检查结果', '修改后备注']] = chunk['专业备注'].apply(
+        chunk[['备注检查结果', '修改后备注']] = chunk[remark_col].apply(
             lambda x: pd.Series(process_remark(x)))
 
     # 分数检查
@@ -287,30 +370,20 @@ def process_chunk(chunk):
     if all(col in chunk.columns for col in score_columns):
         chunk['分数检查结果'] = chunk.apply(check_score_consistency, axis=1)
 
-    # 选科要求处理
-    if '选科要求' in chunk.columns:
-        def proc_req(req):
-            if pd.isna(req) or not str(req).strip():
-                return ["", ""]
-            s = str(req).strip()
-            if "不限" in s:
-                return ["不限科目专业组", ""]
-            if len(s) == 1:
-                return ["单科、多科均需选考", s]
-            if "且" in s:
-                return ["单科、多科均需选考", s.replace("且", "")]
-            if "或" in s:
-                return ["多门选考", s.replace("或", "")]
-            return ["", ""]
+    # 选科要求处理：依据 docx，支持 选科要求 或 报考要求，统一用 convert_selection_requirement_from_requirement
+    req_col = '选科要求' if '选科要求' in chunk.columns else ('报考要求' if '报考要求' in chunk.columns else None)
+    if req_col:
+        chunk[['选科要求说明', '次选']] = chunk[req_col].apply(
+            lambda x: pd.Series(convert_selection_requirement_from_requirement(x)))
 
-        chunk[['选科要求说明', '次选']] = chunk['选科要求'].apply(
-            lambda x: pd.Series(proc_req(x)))
-
-    # 招生科类处理
-    if '招生科类' in chunk.columns:
-        chunk['招生科类'] = chunk['招生科类'].replace({'物理': '物理类', '历史': '历史类'})
+    # 招生科类处理（支持 招生科类 或 科类），统一为物理类/历史类并生成首选科目
+    cat_col = '招生科类' if '招生科类' in chunk.columns else ('科类' if '科类' in chunk.columns else None)
+    if cat_col:
+        chunk['招生科类'] = chunk[cat_col].replace({'物理': '物理类', '历史': '历史类'})
         chunk['首选科目'] = chunk['招生科类'].apply(
-            lambda x: str(x)[0] if x in ['物理类', '历史类'] else "")
+            lambda x: _get_first_subject(x) if pd.notna(x) and str(x).strip() else '')
+    elif '首选科目' not in chunk.columns and req_col:
+        chunk['首选科目'] = ''
 
     return chunk
 
