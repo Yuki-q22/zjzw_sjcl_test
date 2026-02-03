@@ -1468,14 +1468,15 @@ def generate_plan_score_key(item):
 
 
 def generate_plan_college_key(item):
-    """生成招生计划 vs 院校分的组合键"""
-    year = str(item.get('年份', '') or '').strip()
+    """生成招生计划 vs 院校分的组合键
+    比对字段：省份、学校、科类、批次、专业组代码、招生代码"""
     province = str(item.get('省份', '') or '').strip()
     school = str(item.get('学校', '') or '').strip()
     subject = str(item.get('科类', '') or '').strip()
     batch = str(item.get('批次', '') or '').strip()
     group_code = str(item.get('专业组代码', '') or '').strip()
-    return f"{year}|{province}|{school}|{subject}|{batch}|{group_code}"
+    recruit_code = str(item.get('招生代码', '') or '').strip()
+    return f"{province}|{school}|{subject}|{batch}|{group_code}|{recruit_code}"
 
 
 def compare_plan_vs_score(plan_df, score_df):
@@ -1545,22 +1546,22 @@ def compare_plan_vs_college(plan_df, college_df):
             'index': idx + 1,
             'originalIndex': idx,
             'keyFields': {
-                '年份': item.get('年份', '') or '',
                 '省份': item.get('省份', '') or '',
                 '学校': item.get('学校', '') or '',
                 '科类': item.get('科类', '') or '',
                 '批次': item.get('批次', '') or '',
-                '专业组代码': item.get('专业组代码', '') or ''
+                '专业组代码': item.get('专业组代码', '') or '',
+                '招生代码': item.get('招生代码', '') or ''
             },
             'exists': exists,
             'otherInfo': {
+                '年份': item.get('年份', '') or '',
                 '专业': item.get('专业', '') or '',
                 '层次': item.get('层次', '') or '',
                 '招生人数': item.get('招生人数', '') or '',
                 '学费': item.get('学费', '') or '',
                 '学制': item.get('学制', '') or '',
                 '专业代码': item.get('专业代码', '') or '',
-                '招生代码': item.get('招生代码', '') or '',
                 '数据来源': item.get('数据来源', '') or '',
                 '备注': item.get('备注', '') or '',
                 '招生类型': item.get('招生类型', '') or '',
@@ -2948,7 +2949,7 @@ with tab7:
         - 匹配字段：年份、省份、学校、科类、批次、专业、层次、专业组代码
 
         **比对2（招生计划 vs 院校分）：** 检查招生计划的记录是否在院校分中存在
-        - 匹配字段：年份、省份、学校、科类、批次、专业组代码
+        - 匹配字段：省份、学校、科类、批次、专业组代码、招生代码
         """)
 
     # 文件上传区域
@@ -3246,12 +3247,12 @@ with tab7:
                     for r in display_results:
                         table_data.append({
                             '序号': r['index'],
-                            '年份': r['keyFields']['年份'],
                             '省份': r['keyFields']['省份'],
                             '学校': r['keyFields']['学校'],
                             '科类': r['keyFields']['科类'],
                             '批次': r['keyFields']['批次'],
                             '专业组代码': r['keyFields']['专业组代码'] or '-',
+                            '招生代码': r['keyFields']['招生代码'] or '-',
                             '专业': r['otherInfo']['专业'] or '-',
                             '匹配状态': '✓ 存在' if r['exists'] else '✗ 不存在'
                         })
@@ -3266,12 +3267,12 @@ with tab7:
                         for r in results:
                             export_data.append({
                                 '序号': r['index'],
-                                '年份': r['keyFields']['年份'],
                                 '省份': r['keyFields']['省份'],
                                 '学校': r['keyFields']['学校'],
                                 '科类': r['keyFields']['科类'],
                                 '批次': r['keyFields']['批次'],
                                 '专业组代码': r['keyFields']['专业组代码'],
+                                '招生代码': r['keyFields']['招生代码'],
                                 '专业': r['otherInfo']['专业'],
                                 '层次': r['otherInfo']['层次'],
                                 '招生人数': r['otherInfo']['招生人数'],
@@ -3345,12 +3346,12 @@ with tab7:
                                 for r in st.session_state.plan_college_results:
                                     export_data.append({
                                         '序号': r['index'],
-                                        '年份': r['keyFields']['年份'],
                                         '省份': r['keyFields']['省份'],
                                         '学校': r['keyFields']['学校'],
                                         '科类': r['keyFields']['科类'],
                                         '批次': r['keyFields']['批次'],
                                         '专业组代码': r['keyFields']['专业组代码'],
+                                        '招生代码': r['keyFields']['招生代码'],
                                         '专业': r['otherInfo']['专业'],
                                         '层次': r['otherInfo']['层次'],
                                         '招生人数': r['otherInfo']['招生人数'],
