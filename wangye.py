@@ -2341,59 +2341,6 @@ if page == "📁 数据提取":
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
 
-# ====================== 学业桥数据处理 ======================
-with tab3:
-    st.header("学业桥数据处理")
-
-    # 文件上传
-    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="remarks_file")
-
-    if uploaded_file is not None:
-        st.success(f"已选择文件: {uploaded_file.name}")
-
-        # 显示处理进度
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        status_text.text("准备处理...")
-
-        # 处理按钮
-        if st.button("开始数据处理", key="process_remarks"):
-            try:
-                # 保存上传的文件到临时位置
-                temp_file = "temp_remarks.xlsx"
-                with open(temp_file, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-
-
-                # 进度回调函数
-                def update_progress(current, total):
-                    percent = int((current / total) * 100)
-                    progress_bar.progress(percent)
-                    status_text.text(f"处理中... {percent}%")
-
-
-                # 处理文件
-                output_path = process_remarks_file(temp_file, progress_callback=update_progress)
-
-                # 处理完成
-                progress_bar.progress(100)
-                status_text.text("处理完成！")
-                st.balloons()
-
-                # 提供下载链接
-                with open(output_path, "rb") as f:
-                    bytes_data = f.read()
-                b64 = base64.b64encode(bytes_data).decode()
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="学业桥数据处理结果.xlsx">点击下载处理结果</a>'
-                st.markdown(href, unsafe_allow_html=True)
-
-                # 清理临时文件
-                os.remove(temp_file)
-                os.remove(output_path)
-
-            except Exception as e:
-                st.error(f"处理过程中发生错误: {str(e)}")
-
 # ====================== 数据校验功能 ======================
 elif page == "✅ 数据校验":
     st.markdown("## ✅ 数据校验")
@@ -2409,8 +2356,48 @@ elif page == "✅ 数据校验":
     if validate_mode == "学业桥数据处理":
         st.subheader("学业桥数据处理")
 
-    # 文件上传
-    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="segmentation_file")
+        uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="remarks_file")
+
+        if uploaded_file is not None:
+            st.success(f"已选择文件: {uploaded_file.name}")
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            status_text.text("准备处理...")
+
+            if st.button("开始数据处理", key="process_remarks"):
+                try:
+                    temp_file = "temp_remarks.xlsx"
+                    with open(temp_file, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+
+                    def update_progress(current, total):
+                        percent = int((current / total) * 100)
+                        progress_bar.progress(percent)
+                        status_text.text(f"处理中... {percent}%")
+
+                    output_path = process_remarks_file(temp_file, progress_callback=update_progress)
+
+                    progress_bar.progress(100)
+                    status_text.text("处理完成！")
+                    st.balloons()
+
+                    with open(output_path, "rb") as f:
+                        bytes_data = f.read()
+                    b64 = base64.b64encode(bytes_data).decode()
+                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="学业桥数据处理结果.xlsx">点击下载处理结果</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+
+                    os.remove(temp_file)
+                    os.remove(output_path)
+
+                except Exception as e:
+                    st.error(f"处理过程中发生错误: {str(e)}")
+    
+    elif validate_mode == "一分一段校验":
+        st.subheader("一分一段校验")
+
+        uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="segmentation_file")
 
     if uploaded_file is not None:
         st.success(f"已选择文件: {uploaded_file.name}")
