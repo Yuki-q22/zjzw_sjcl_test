@@ -1468,14 +1468,14 @@ def generate_plan_score_key(item):
 
 
 def generate_plan_college_key(item):
-    """生成招生计划 vs 院校分的组合键"""
-    year = str(item.get('年份', '') or '').strip()
+    """生成招生计划 vs 院校分的组合键，使用新的组合键字段"""
     province = str(item.get('省份', '') or '').strip()
     school = str(item.get('学校', '') or '').strip()
     subject = str(item.get('科类', '') or '').strip()
     batch = str(item.get('批次', '') or '').strip()
     group_code = str(item.get('专业组代码', '') or '').strip()
-    return f"{year}|{province}|{school}|{subject}|{batch}|{group_code}"
+    recruit_code = str(item.get('招生代码', '') or '').strip()
+    return f"{province}|{school}|{subject}|{batch}|{group_code}|{recruit_code}"
 
 
 def compare_plan_vs_score(plan_df, score_df):
@@ -1545,22 +1545,22 @@ def compare_plan_vs_college(plan_df, college_df):
             'index': idx + 1,
             'originalIndex': idx,
             'keyFields': {
-                '年份': item.get('年份', '') or '',
                 '省份': item.get('省份', '') or '',
                 '学校': item.get('学校', '') or '',
                 '科类': item.get('科类', '') or '',
                 '批次': item.get('批次', '') or '',
-                '专业组代码': item.get('专业组代码', '') or ''
+                '专业组代码': item.get('专业组代码', '') or '',
+                '招生代码': item.get('招生代码', '') or ''
             },
             'exists': exists,
             'otherInfo': {
+                '年份': item.get('年份', '') or '',
                 '专业': item.get('专业', '') or '',
                 '层次': item.get('层次', '') or '',
                 '招生人数': item.get('招生人数', '') or '',
                 '学费': item.get('学费', '') or '',
                 '学制': item.get('学制', '') or '',
                 '专业代码': item.get('专业代码', '') or '',
-                '招生代码': item.get('招生代码', '') or '',
                 '数据来源': item.get('数据来源', '') or '',
                 '备注': item.get('备注', '') or '',
                 '招生类型': item.get('招生类型', '') or '',
@@ -1570,6 +1570,43 @@ def compare_plan_vs_college(plan_df, college_df):
         })
 
     return plan_college_results
+
+
+def filter_unmatched_plan_data_for_college_export(plan_df, college_df):
+    """
+    过滤出招生计划中不存在于院校分中的数据。
+    
+    比对逻辑：
+    - 按省份、学校、科类、批次、专业组代码、招生代码这几个字段进行比对
+    - 只导出招生计划中，这几个字段的组合键不存在的内容
+    - 注意：招生计划中可能存在多个相同的组合键，只要院校分存在一个，就不导出
+    
+    返回：未匹配的招生计划记录列表
+    """
+    unmatched_records = []
+    
+    # 为院校分数据建立组合键集合
+    college_key_set = set()
+    for _, item in college_df.iterrows():
+        key = generate_plan_college_key(item.to_dict())
+        college_key_set.add(key)
+    
+    # 遍历招生计划，找出未匹配的记录
+    seen_keys = set()  # 记录已处理过的组合键，避免重复
+    for idx, row in plan_df.iterrows():
+        item = row.to_dict()
+        key = generate_plan_college_key(item)
+        
+        # 只有当组合键不在院校分中，且这个组合键还没有被处理过时，才添加
+        if key not in college_key_set and key not in seen_keys:
+            seen_keys.add(key)
+            unmatched_records.append({
+                'index': idx + 1,
+                'originalIndex': idx,
+                'data': item
+            })
+    
+    return unmatched_records
 
 
 def get_first_subject(category):
@@ -3430,34 +3467,44 @@ with tab7:
                 if len(all_unmatched_results) > 0:
                     if st.button("⭐ 导出院校分格式数据", type="primary", use_container_width=True):
                         try:
-                            # 提取原始数据（去重，因为同一个记录可能在比对1和比对2中都未匹配）
-                            seen_indices = set()
-                            conversion_data = []
-                            for r in all_unmatched_results:
-                                original_idx = r['originalIndex']
-                                if original_idx not in seen_indices:
-                                    seen_indices.add(original_idx)
-                                    conversion_data.append(st.session_state.plan_data.iloc[original_idx].to_dict())
-
-                            # 转换数据为院校分格式
-                            college_score_data = convert_to_college_score_format(conversion_data)
-
-                            # 导出
-                            temp_path = "temp_college_score.xlsx"
-                            export_college_score_data_to_excel(college_score_data, conversion_data, temp_path)
-
-                            with open(temp_path, 'rb') as f:
-                                st.download_button(
-                                    "📥 下载转换后的院校分数据",
-                                    f.read(),
-                                    file_name=f"院校分数据{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-
-                            os.remove(temp_path)
-                            st.success(f"转换完成！共转换 {len(college_score_data)} 条数据（已去重并分组）")
+                            # 检查是否有院校分数据
+                            if 'college_data' not in st.session_state or st.session_state.college_data is None:
+                                st.error("请先上传院校分文件，以便进行比对过滤")
+                            else:
+                                # 提取原始招生计划数据
+                                plan_df = st.session_state.plan_data.copy()
+                                college_df = st.session_state.college_data.copy()
+                                
+                                # 使用新的过滤函数，只导出招生计划中不存在于院校分的数据
+                                unmatched_records = filter_unmatched_plan_data_for_college_export(plan_df, college_df)
+                                
+                                if len(unmatched_records) == 0:
+                                    st.warning("⚠️ 所有招生计划数据都已存在于院校分中，无需转换")
+                                else:
+                                    # 提取未匹配数据
+                                    conversion_data = [r['data'] for r in unmatched_records]
+                                    
+                                    # 转换数据为院校分格式
+                                    college_score_data = convert_to_college_score_format(conversion_data)
+                                    
+                                    # 导出
+                                    temp_path = "temp_college_score.xlsx"
+                                    export_college_score_data_to_excel(college_score_data, conversion_data, temp_path)
+                                    
+                                    with open(temp_path, 'rb') as f:
+                                        st.download_button(
+                                            "📥 下载转换后的院校分数据",
+                                            f.read(),
+                                            file_name=f"院校分数据{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
+                                    
+                                    os.remove(temp_path)
+                                    st.success(f"转换完成！共转换 {len(college_score_data)} 条数据（已筛选出招生计划中不存在于院校分的数据）")
                         except Exception as e:
                             st.error(f"转换失败: {str(e)}")
+                            import traceback
+                            st.error(traceback.format_exc())
                 else:
                     st.info("暂无未匹配数据")
 
