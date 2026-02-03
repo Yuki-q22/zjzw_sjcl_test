@@ -3467,7 +3467,7 @@ with tab7:
 
             with col3:
                 if len(all_unmatched_results) > 0:
-                    if st.button("⭐ 导出院校分格式数据", type="primary", use_container_width=True):
+                    if st.button("⭐ 导出未匹配数据为院校分格式", type="primary", use_container_width=True):
                         try:
                             # 检查是否有院校分数据
                             if 'college_data' not in st.session_state or st.session_state.college_data is None:
@@ -3497,12 +3497,12 @@ with tab7:
                                         st.download_button(
                                             "📥 下载转换后的院校分数据",
                                             f.read(),
-                                            file_name=f"院校分数据{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                            file_name=f"院校分数据_未匹配数据导出{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                         )
                                     
                                     os.remove(temp_path)
-                                    st.success(f"转换完成！共转换 {len(college_score_data)} 条数据（已筛选出招生计划中不存在于院校分的数据）")
+                                    st.success(f"转换完成！共转换 {len(college_score_data)} 条数据")
                         except Exception as e:
                             st.error(f"转换失败: {str(e)}")
                             import traceback
