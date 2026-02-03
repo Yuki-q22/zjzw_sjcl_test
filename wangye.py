@@ -1547,6 +1547,7 @@ def compare_plan_vs_college(plan_df, college_df):
             'keyFields': {
                 '省份': item.get('省份', '') or '',
                 '学校': item.get('学校', '') or '',
+                '层次': item.get('层次', '') or '',
                 '科类': item.get('科类', '') or '',
                 '批次': item.get('批次', '') or '',
                 '专业组代码': item.get('专业组代码', '') or '',
@@ -1902,22 +1903,17 @@ def convert_to_college_score_format(conversion_data):
             return default
         return value_str
 
-    # 构建分组键：省份、学校、科类、批次、招生类型、层次、专业组代码
-    # 如果专业组代码为空，则不包含在分组键中
+    # 构建分组键：学校、省份、层次、科类、批次、专业组代码、招生代码
+    # 所有字段缺失时使用空字符串，占位保持一致
     def get_group_key(item):
-        province = safe_str(item.get('省份', ''))
         school = safe_str(item.get('学校', ''))
+        province = safe_str(item.get('省份', ''))
+        level = safe_str(item.get('层次', ''))
         subject = safe_str(item.get('科类', ''))
         batch = safe_str(item.get('批次', ''))
-        recruit_type = safe_str(item.get('招生类型', ''))
-        level = safe_str(item.get('层次', ''))
-        group_code = safe_str(item.get('专业组代码', ''))
-
-        # 如果专业组代码为空或只有^，则不包含在分组键中
-        if not group_code or group_code == '^' or group_code == '':
-            return (province, school, subject, batch, recruit_type, level)
-        else:
-            return (province, school, subject, batch, recruit_type, level, group_code)
+        group_code = safe_str(item.get('专业组代码', '')).lstrip('^')
+        recruit_code = safe_str(item.get('招生代码', '')).lstrip('^')
+        return (school, province, level, subject, batch, group_code, recruit_code)
 
     # 按分组键分组
     grouped_data = {}
@@ -1930,31 +1926,26 @@ def convert_to_college_score_format(conversion_data):
     # 转换为院校分格式
     college_score_data = []
     for key, items in grouped_data.items():
-        # 取第一条记录作为基础数据
+        # items 是同一组合键下的所有原始记录，取第一条作为基础记录用于填充其他字段
         base_item = items[0]
 
-        # 计算招生人数总和
-        total_recruit_num = 0
+        # 计算该组合键下的招生人数总和（忽略无法转换的值）
+        total_recruit_num = 0.0
         for item in items:
-            recruit_num = item.get('招生人数', '') or ''
-            if recruit_num and not pd.isna(recruit_num):
-                try:
-                    total_recruit_num += float(str(recruit_num))
-                except:
-                    pass
+            recruit_num = item.get('招生人数', '')
+            if recruit_num is None or (isinstance(recruit_num, str) and recruit_num.strip() == ''):
+                continue
+            try:
+                total_recruit_num += float(str(recruit_num))
+            except:
+                continue
 
-        # 处理专业组代码：如果为空或只有^，则设为空字符串
+        # 处理专业组代码与招生代码，去掉开头的^并保持空字符串
         group_code = safe_str(base_item.get('专业组代码', '')).lstrip('^')
-        if not group_code or group_code == '^':
-            group_code = ''
-
-        # 处理院校招生代码：去除开头的^符号
         recruit_code = safe_str(base_item.get('招生代码', '')).lstrip('^')
 
-        # 处理招生人数：保持为字符串格式（文本格式）
-        recruit_num_str = str(int(total_recruit_num)) if total_recruit_num > 0 else ''
+        recruit_num_str = str(int(total_recruit_num)) if total_recruit_num and total_recruit_num > 0 else ''
 
-        # 构建院校分记录
         college_record = {
             '学校名称': safe_str(base_item.get('学校', '')),
             '省份': safe_str(base_item.get('省份', '')),
@@ -1979,7 +1970,7 @@ def convert_to_college_score_format(conversion_data):
             '院校招生代码': recruit_code
         }
 
-        # 处理首选科目：只有招生类别为物理类/历史类时才填入
+        # 首选科目
         category = college_record['招生类别']
         if '物理类' in category or category == '物理':
             college_record['首选科目'] = '物理'
