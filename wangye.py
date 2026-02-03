@@ -1592,15 +1592,13 @@ def filter_unmatched_plan_data_for_college_export(plan_df, college_df):
         key = generate_plan_college_key(item.to_dict())
         college_key_set.add(key)
     
-    # 遍历招生计划，找出未匹配的记录
-    seen_keys = set()  # 记录已处理过的组合键，避免重复
+    # 遍历招生计划，找出未匹配的记录（保留所有未匹配行，以便后续按组合键汇总招生人数）
     for idx, row in plan_df.iterrows():
         item = row.to_dict()
         key = generate_plan_college_key(item)
-        
-        # 只有当组合键不在院校分中，且这个组合键还没有被处理过时，才添加
-        if key not in college_key_set and key not in seen_keys:
-            seen_keys.add(key)
+
+        # 只要组合键不在院校分集中，就把该行加入未匹配列表（保留重复组合键）
+        if key not in college_key_set:
             unmatched_records.append({
                 'index': idx + 1,
                 'originalIndex': idx,
