@@ -2128,30 +2128,6 @@ def export_converted_data_to_excel(data, conversion_data, output_path):
     wb.save(output_path)
 
 
-def export_unmatched_major_format(data, output_path):
-    """导出未匹配数据为简化的专业分格式（只包含年份、省份、学校、科类、批次、专业、层次、专业组代码）"""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-
-    headers = ['年份', '省份', '学校', '科类', '批次', '专业', '层次', '专业组代码']
-    for col_idx, h in enumerate(headers, start=1):
-        ws.cell(row=1, column=col_idx, value=h)
-
-    for row_idx, row in enumerate(data, start=2):
-        for col_idx, h in enumerate(headers, start=1):
-            v = row.get(h, '')
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                v = ''
-            cell = ws.cell(row=row_idx, column=col_idx, value=v)
-            if h == '专业组代码':
-                cell.number_format = numbers.FORMAT_TEXT
-
-    # 设置列宽
-    for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = 12
-
-    wb.save(output_path)
-
 
 # ============================
 # Streamlit页面布局
