@@ -1351,6 +1351,19 @@ def process_data(dfA, dfB):
     results = dfA.apply(get_code, axis=1)
     dfA["专业组代码"] = results.apply(lambda x: x[0] if x[0] is not None else "")
     
+
+    col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("全选当前页", use_container_width=True):
+        # 逻辑：将当前显示的记录全部标记为已选
+        pass
+with col2:
+    if st.button("批量填充相同代码", use_container_width=True):
+        # 弹出一个对话框，输入代码，应用到当前筛选后的所有记录
+        pass
+with col3:
+    st.write(f"已完成：{processed_count}/{total_count}")
+    
     # 收集需要手动补充的记录（包含完整的候选记录信息）
     # 只要专业组代码没匹配到的，都需要手动选择
     for idx, row in dfA.iterrows():
