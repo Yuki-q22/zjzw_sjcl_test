@@ -3119,6 +3119,14 @@ with tab8:
                 "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
             )
             parse_clicked = st.form_submit_button("生成映射预览")
+            sample_clicked = st.button("加载示例规则", key="load_example_remark_mapping")
+
+        if sample_clicked:
+            st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+            st.session_state.remark_mapping_text_input = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+            mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(st.session_state.remark_mapping_text)) if st.session_state.remark_mapping_text else pd.DataFrame([])
+            st.session_state.remark_mappings = normalize_remark_type_mappings(mapping_df)
+            st.session_state.remark_mapping_error = ''
 
         if parse_clicked:
             st.session_state.remark_mapping_text = st.session_state.remark_mapping_text_input
@@ -3132,11 +3140,22 @@ with tab8:
     with col_right:
         st.subheader("2. 映射规则预览")
         if st.session_state.remark_mappings:
-            st.dataframe(pd.DataFrame(st.session_state.remark_mappings), use_container_width=True)
+            card_cols = st.columns(2)
+            for idx, item in enumerate(st.session_state.remark_mappings):
+                col = card_cols[idx % 2]
+                col.markdown(
+                    f"<div style='border:1px solid #e1e1e1; border-radius:12px; padding:12px; margin-bottom:12px; background:#f7f7f7;'>"
+                    f"<div style='font-size:14px; font-weight:700; margin-bottom:8px;'>备注查找字段</div>"
+                    f"<div style='margin-bottom:8px; color:#222;'>{item['备注查找字段']}</div>"
+                    f"<div style='color:#555; margin-bottom:4px;'><strong>输出招生类型：</strong>{item['输出招生类型']}</div>"
+                    f"<div style='color:#555;'><strong>优先级：</strong>{item['优先级']}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
         elif st.session_state.remark_mapping_error:
             st.warning(st.session_state.remark_mapping_error)
         else:
-            st.info("请点击“生成映射预览”查看规则表格。")
+            st.info("请点击“生成映射预览”查看规则预览。")
 
     st.markdown("---")
     st.subheader("3. 上传备注文件并提取招生类型")
