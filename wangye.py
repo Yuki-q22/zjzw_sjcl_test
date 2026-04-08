@@ -3045,6 +3045,15 @@ with tab8:
         "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
     )
 
+    type_keywords_text = st.text_area(
+        "招生类型关键词（按优先级从上到下填写，每行一个）",
+        value=DEFAULT_REMARK_TYPE_KEYWORDS,
+        height=240
+    )
+    st.markdown(
+        "提示：请先填写关键词列表，再上传备注文件。备注中若包含“除了”、“不含”、“除外”、“没有”，输出结果中“需要核查”会标记为“是”。"
+    )
+
     uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
     if uploaded_file is not None:
         uploaded_bytes = uploaded_file.getvalue()
@@ -3063,14 +3072,6 @@ with tab8:
                         default_index = idx
                         break
                 remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
-                type_keywords_text = st.text_area(
-                    "招生类型关键词（按优先级从上到下填写，每行一个）",
-                    value=DEFAULT_REMARK_TYPE_KEYWORDS,
-                    height=240
-                )
-                st.markdown(
-                    "提示：备注中若包含“除了”、“不含”、“除外”、“没有”，输出结果中“需要核查”会标记为“是”。"
-                )
 
                 if st.button("开始提取招生类型", key="process_remark_type"):
                     type_keywords = parse_recruitment_type_keywords(type_keywords_text)
