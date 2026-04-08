@@ -3115,9 +3115,7 @@ with tab8:
                 height=260,
                 key="remark_mapping_text_input"
             )
-            st.markdown(
-                "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
-            )
+            
             parse_clicked = st.form_submit_button("生成映射预览")
 
         if parse_clicked:
