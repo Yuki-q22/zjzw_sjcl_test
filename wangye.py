@@ -2316,7 +2316,7 @@ with st.expander("📌 功能说明", expanded=True):
     """)
 
 # 更新日志对话框
-with st.expander("📢 版本更新（2026.1.27更新）（必看！）", expanded=False):
+with st.expander("📢 版本更新（2026.4.8更新）（必看！）", expanded=False):
     st.markdown("""
     ### 2026.4.8更新
     • 新增了“备注招生类型提取”功能，可以从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录
