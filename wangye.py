@@ -3098,24 +3098,18 @@ with tab8:
         "请先配置映射规则：备注查找字段、输出招生类型、优先级。优先级数值越小，匹配顺序越靠前。"
     )
 
-    default_mapping_df = get_default_remark_type_mapping_df()
-    try:
-        mapping_df = st.experimental_data_editor(
-            default_mapping_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="remark_type_mapping_editor"
-        )
-        mappings = normalize_remark_type_mappings(mapping_df)
-    except Exception:
-        st.warning("当前 Streamlit 版本不支持可编辑表格，请使用文本方式输入映射规则。")
-        mapping_text = st.text_area(
-            "请输入映射规则（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
-            value=DEFAULT_REMARK_TYPE_MAPPING_TEXT,
-            height=240
-        )
-        mappings = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
-        mappings = normalize_remark_type_mappings(mappings)
+    mapping_text = st.text_area(
+        "请输入映射规则（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
+        value=DEFAULT_REMARK_TYPE_MAPPING_TEXT,
+        height=240
+    )
+    mappings = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
+    mappings = normalize_remark_type_mappings(mappings)
+    if not mappings.empty:
+        st.markdown("**已解析映射规则（按优先级排序）**")
+        st.dataframe(pd.DataFrame(mappings), use_container_width=True)
+    else:
+        st.warning("当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级")
 
     uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
     if uploaded_file is not None:
