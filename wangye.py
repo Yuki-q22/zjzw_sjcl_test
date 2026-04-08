@@ -793,7 +793,7 @@ DEFAULT_REMARK_TYPE_MAPPING = [
 DEFAULT_REMARK_TYPE_MAPPING_TEXT = "备注查找字段\t输出招生类型\t优先级\n" + "\n".join(
     [f"{item['备注查找字段']}\t{item['输出招生类型']}\t{item['优先级']}" for item in DEFAULT_REMARK_TYPE_MAPPING]
 )
-EXCLUSION_KEYWORDS = ["除了", "不含", "除外", "没有"]
+EXCLUSION_KEYWORDS = ["除了", "不含", "除外", "没有", "除"]
 
 
 def get_default_remark_type_mapping_df():
