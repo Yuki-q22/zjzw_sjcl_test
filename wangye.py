@@ -125,65 +125,6 @@ def _get_first_subject(category):
     return ''
 
 
-PRIORITY_REMARK_TYPES = [
-    ("中外合作", "中外合作办学"),
-    ("中外高水平大学学生交流计划", "中外高水平大学学生交流计划"),
-    ("学分互认联合培养项目", "学分互认联合培养项目"),
-    ("地方专项", "地方专项计划"),
-    ("国家专项", "国家专项计划"),
-    ("高校专项", "高校专项计划"),
-    ("艺术类", "艺术类"),
-    ("闽台合作", "闽台合作"),
-    ("预科", "预科"),
-    ("定向", "定向"),
-    ("护理类", "护理类"),
-    ("民族班", "民族班"),
-    ("联合办学", "联合办学"),
-    ("联办", "联合办学"),
-    ("建档立卡专项", "建档立卡专项"),
-    ("藏区专项", "藏区专项"),
-    ("少数民族紧缺人才培养专项", "少数民族紧缺人才培养专项"),
-    ("民语类及对等培养", "民语类及对等培养")
-]
-SPECIAL_CHECK_PHRASES = ["除了", "不含", "除外", "没有"]
-
-
-def extract_enrollment_type_from_remark(remark):
-    if pd.isna(remark):
-        return ''
-    text = str(remark).strip()
-    for keyword, output in PRIORITY_REMARK_TYPES:
-        if keyword in text:
-            return output
-    return ''
-
-
-def remark_needs_check(remark):
-    if pd.isna(remark):
-        return False
-    text = str(remark)
-    return any(phrase in text for phrase in SPECIAL_CHECK_PHRASES)
-
-
-def process_remark_type_file(df, remark_col):
-    output_rows = []
-    for _, row in df.iterrows():
-        remark = row.get(remark_col, '')
-        zhaosheng_type = extract_enrollment_type_from_remark(remark)
-        need_check = '是' if remark_needs_check(remark) else '否'
-        output_rows.append({
-            '备注': remark if pd.notna(remark) else '',
-            '招生类型': zhaosheng_type,
-            '需要核查': need_check
-        })
-    return pd.DataFrame(output_rows, columns=['备注', '招生类型', '需要核查'])
-
-
-def export_dataframe_to_excel(df, output_path, sheet_name='Sheet1'):
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-
-
 def _normalize_kele(kele):
     """转换招生科类：物理→物理类，历史→历史类，其他科类直接返回。"""
     if kele is None or (isinstance(kele, str) and not kele.strip()):
@@ -824,6 +765,93 @@ def _find_remark_column(df):
     return None
 
 
+DEFAULT_REMARK_TYPE_KEYWORDS = """中外合作
+中外高水平大学生交流计划
+学分互认联合培养项目
+地方专项
+国家专项
+高校专项
+艺术类
+闽台合作
+预科
+定向
+护理类
+民族班
+联合办学
+联办
+建档立卡专项
+藏区专项
+少数民族紧缺人才培养专项
+民语类及对等培养"""
+EXCLUSION_KEYWORDS = ["除了", "不含", "除外", "没有"]
+
+
+def parse_recruitment_type_keywords(text):
+    return [line.strip() for line in str(text).splitlines() if line.strip()]
+
+
+def extract_recruitment_type(remark, type_keywords):
+    if pd.isna(remark) or not str(remark).strip():
+        return ''
+    remark_text = str(remark)
+    for keyword in type_keywords:
+        if keyword and keyword in remark_text:
+            return keyword
+    return ''
+
+
+def remark_needs_review(remark):
+    if pd.isna(remark) or not str(remark).strip():
+        return '否'
+    remark_text = str(remark)
+    return '是' if any(word in remark_text for word in EXCLUSION_KEYWORDS) else '否'
+
+
+def process_remark_type_file(file_path, remark_col, type_keywords, progress_callback=None):
+    try:
+        df = pd.read_excel(file_path, header=0, keep_default_na=False)
+    except Exception as e:
+        raise Exception(f"读取文件错误：{e}")
+
+    if remark_col not in df.columns:
+        raise Exception(f"备注字段 {remark_col} 不存在于文件中")
+
+    result_df = pd.DataFrame({
+        '备注': df[remark_col].apply(lambda x: '' if pd.isna(x) else str(x)),
+        '招生类型': df[remark_col].apply(lambda x: extract_recruitment_type(x, type_keywords)),
+        '需要核查': df[remark_col].apply(remark_needs_review)
+    })
+
+    output_path = os.path.splitext(file_path)[0] + '_备注提取结果.xlsx'
+    try:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Sheet1'
+
+        headers = ['备注', '招生类型', '需要核查']
+        for col_idx, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        for row_idx, (_, row_data) in enumerate(result_df.iterrows(), start=2):
+            ws.cell(row=row_idx, column=1, value=row_data['备注'])
+            ws.cell(row=row_idx, column=2, value=row_data['招生类型'])
+            ws.cell(row=row_idx, column=3, value=row_data['需要核查'])
+
+        for col_idx in range(1, 4):
+            for row_idx in range(2, len(result_df) + 2):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if cell.value is not None and str(cell.value).strip() != '':
+                    cell.number_format = numbers.FORMAT_TEXT
+
+        wb.save(output_path)
+    except Exception as e:
+        raise Exception(f"保存文件错误：{e}")
+
+    if progress_callback:
+        progress_callback(1, 1)
+    return output_path
+
+
 def process_remarks_file(file_path, progress_callback=None):
     """学业桥数据处理：上传文件第1行为标题，校验指定列；校对学校/专业/备注后按新格式导出。"""
     try:
@@ -1409,7 +1437,6 @@ def process_data(dfA, dfB):
     # 应用匹配逻辑
     results = dfA.apply(get_code, axis=1)
     dfA["专业组代码"] = results.apply(lambda x: x[0] if x[0] is not None else "")
-    
     
     # 收集需要手动补充的记录（包含完整的候选记录信息）
     # 只要专业组代码没匹配到的，都需要手动选择
@@ -2214,271 +2241,319 @@ def export_unmatched_major_format(data, output_path):
 
 
 # ============================
-# 新的界面布局（侧边栏导航 + 主区域功能）
+# Streamlit页面布局
 # ============================
-
-# ---- 侧边栏 ----
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)  # 可选图标
-    st.title("📊 导航菜单")
-    st.markdown("请选择要使用的功能：")
-    
-    # 功能选项
-    menu_options = [
-        "🏫 院校分提取（普通类）",
-        "🎨 院校分提取（艺体类）",
-        "📚 学业桥数据处理",
-        "🧾 招生类型提取",
-        "📈 一分一段校验",
-        "🔗 专业组代码匹配",
-        "🖼️ 就业质量报告图片提取",
-        "📊 招生计划数据比对"
-    ]
-    selected_menu = st.radio("", menu_options, label_visibility="collapsed")
-    
-    st.markdown("---")
-    with st.expander("📢 版本更新 & 使用帮助"):
-        st.markdown("""
-        **2026.1.27更新**
-        • 专业分匹配逻辑优化（学校-省份-层次-科类-批次），重复及未匹配需手动补充
-        • 招生计划数据对比逻辑优化（检查无专业组代码省份的选科要求）
-        
-        **历史更新摘要**
-        - 2025.4.14: 招生/专业代码保持文本格式，增加功能说明
-        - 2025.5.22: 院校分提取中录取人数逻辑优化，学业桥增加分数校验
-        - 2025.5.27: 学业桥新增选科要求、次选科目自动转换
-        - 2025.5.30: 一分一段自动补断点、校验
-        - 2025.6.12: 院校分最高分提取逻辑更新
-        - 2025.6.14: 专业组代码匹配功能
-        - 2025.7.7: 就业质量报告图片抓取
-        - 2025.9.26: 艺体类院校分提取
-        """)
-    st.markdown("---")
-    st.caption("如有疑问，请联系技术支持")
-
-# ---- 主区域 ----
+# 页面标题
 st.title("📊 数据处理工具")
-st.markdown("欢迎使用！请从左侧菜单选择所需功能，按照页面提示上传文件并处理。")
+st.markdown("---")
 
-# 根据选择的功能渲染不同的界面
-if selected_menu == "🏫 院校分提取（普通类）":
+# 功能说明
+with st.expander("📌 功能说明", expanded=True):
+    st.markdown("""
+    1. 上传的文件使用库中专业分、院校分、招生计划、一分一段的模板，直接上传即可，无需删减
+    2. 学业桥数据处理可直接上传从学业桥导出的专业分
+    3. 校验一分一段时，内容不能为文本格式
+    4. 使用专业组代码匹配时，两份文件中的“学校-省份-层次-科类-批次-类型”这些字段需要保持一致
+    """)
+
+# 更新日志对话框
+with st.expander("📢 版本更新（2026.1.27更新）（必看！）", expanded=False):
+    st.markdown("""
+    ### 2026.1.27更新
+    • 修改了专业分匹配逻辑（“学校-省份-层次-科类-批次”），重复字段及未匹配到的内容需要手动补充
+
+    • 修改了招生计划数据对比逻辑（需检查无专业组代码的省份的选科要求）
+
+    ### 历史更新
+
+    #### 2025.4.14更新
+    • 招生代码和专业代码保持文本格式  
+    • 增加功能说明  
+    • 优化工具界面  
+
+    #### 2025.4.16更新
+    • 优化了院校分提取处理逻辑  
+
+    #### 2025.5.22更新
+    • 更新了院校分提取中录取人数的处理逻辑（建议进行抽查）  
+    • 学业桥数据处理中增加了最高分、平均分、最低分的校验，会在最后加一列校验结果  
+
+    #### 2025.5.23更新
+    • 学业桥数据处理中增加了学校名称和招生专业的匹配  
+
+    #### 2025.5.27更新
+    • 学业桥数据处理中，增加了"招生科类"、"首选科目"、"选科要求"，"次选科目"的处理  
+      - 学业桥提供的"3+1+2"省份的招生科类为"物理"、"历史"，可以直接转换为标准的"物理类"、"历史类"  
+      - "3+1+2"省份的首选科目可以直接根据招生科类提取  
+      - 新增了选科要求、次选科目的处理，可直接转换为标准格式，无需手动处理（处理后的数据在文档最后几列）  
+
+    #### 2025.5.30更新
+    新增"一分一段数据处理"  
+      - 可直接校验分数、累计人数  
+      - 自动补断点  
+      - 自动增加"最高分——满分"的区间（上海满分660，海南满分900）  
+
+    ### 2025.6.6更新
+    "一分一段数据处理"优化  
+      - 自动补充"最高分——满分"的区间（上海满分660，海南满分900）  
+      - 只有累计人数没有人数时，可计算人数，无需手动操作  
+      - 补断点的分数标注颜色，并在分数和人数校验中标注"补断点"
+
+    ### 2025.6.12更新
+    院校分提取逻辑更新  
+      - 提取最高分改为取同一个“学校-省份-层次-科类-批次-类型（-专业组代码）”下的最高分
+
+    ### 2025.6.14更新
+    专业组代码匹配功能  
+      - 需要上传专业分导入模板和库中招生计划导出模板
+      - 把库中导出招生计划类型尽量补充完整，否则容易出错
+      - 匹配结果需要检查
+
+    ### 2025.7.7更新
+    就业质量报告图片抓取功能  
+      - 抓取就业质量报告图片
+      - 如果抓取到的图片比较多，“下载PDF”的弹框会出现比较慢
+      - 注意：只能抓取静态页面的图片，动态页面和有限制的网页无法抓取
+
+
+    ### 2025.9.26更新
+    • 更新了院校分中最高分的提取逻辑  
+    • 新增了艺体类院校分提取功能，可以直接上传艺体类专业分模板（可把特殊类型<如：中外合作办学>的备注在专业分中放到专业方向再提取）
+
+
+    """)
+
+# 创建选项卡
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    [
+        "院校分提取（普通类）",
+        "院校分提取（艺体类）",
+        "学业桥数据处理",
+        "一分一段校验",
+        "专业组代码匹配",
+        "就业质量报告图片提取",
+        "招生计划数据比对",
+        "备注招生类型提取"
+    ]
+)
+
+# ====================== 院校分提取 ======================
+with tab1:
     st.header("院校分提取（普通类）")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 将上传的普通类专业分模板（第3行开始为数据）提取为院校分格式。
-        **文件要求：** 请使用标准模板，包含学校名称、省份、招生专业、一级层次、招生科类、招生批次、招生类型、最高分、最低分、平均分、最低分位次、招生人数、数据来源、专业组代码、首选科目、选科要求、次选科目、专业代码、招生代码等列。
-        **操作步骤：**
-        1. 点击下方上传按钮，选择符合要求的Excel文件（.xlsx）。
-        2. 点击“开始数据处理”按钮。
-        3. 处理完成后，点击下载链接保存结果。
-        """)
+
+    # 文件上传
     uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="score_file")
+
     if uploaded_file is not None:
         st.success(f"已选择文件: {uploaded_file.name}")
+
+        # 显示处理进度
         progress_bar = st.progress(0)
         status_text = st.empty()
         status_text.text("准备处理...")
+
+        # 处理按钮
         if st.button("开始数据处理", key="process_score"):
             try:
+                # 保存上传的文件到临时位置
                 temp_file = "temp_score.xlsx"
                 with open(temp_file, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+
+                # 处理文件
                 for percent_complete in range(0, 101, 10):
                     progress_bar.progress(percent_complete)
                     status_text.text(f"处理中... {percent_complete}%")
+
+                    # 模拟处理过程，实际使用时替换为您的process_score_file函数
                     if percent_complete == 100:
                         output_path = process_score_file(temp_file)
+
+                # 处理完成
                 status_text.text("处理完成！")
                 st.balloons()
+
+                # 提供下载链接
                 with open(output_path, "rb") as f:
                     bytes_data = f.read()
                 b64 = base64.b64encode(bytes_data).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="院校分提取结果.xlsx">点击下载处理结果</a>'
                 st.markdown(href, unsafe_allow_html=True)
+
+                # 清理临时文件
                 os.remove(temp_file)
                 os.remove(output_path)
+
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
 
-elif selected_menu == "🎨 院校分提取（艺体类）":
+# ====================== 院校分提取（艺体类） ======================
+with tab2:
     st.header("院校分提取（艺体类）")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 将上传的艺体类专业分模板（第3行开始为数据）提取为院校分格式。
-        **文件要求：** 包含学校名称、省份、专业、专业方向、专业备注、专业层次、专业类别、是否校考、招生类别、招生批次、最低分、最低分位次、专业组代码、首选科目、选科要求、次选科目、招生代码、校统考分、校文化分、专业代码、数据来源等列。
-        **操作步骤：**
-        1. 点击下方上传按钮，选择符合要求的Excel文件。
-        2. 点击“开始数据处理”按钮。
-        3. 处理完成后，点击下载链接保存结果。
-        """)
+
+    # 文件上传
     uploaded_file_new = st.file_uploader("选择Excel文件", type=["xlsx"], key="new_score_file")
+
     if uploaded_file_new is not None:
         st.success(f"已选择文件: {uploaded_file_new.name}")
+
+        # 显示处理进度
         progress_bar = st.progress(0)
         status_text = st.empty()
         status_text.text("准备处理...")
+
+        # 处理按钮
         if st.button("开始数据处理", key="process_new_score"):
             try:
+                # 保存上传的文件到临时位置
                 temp_file = "temp_new_score.xlsx"
                 with open(temp_file, "wb") as f:
                     f.write(uploaded_file_new.getbuffer())
+
+                # 处理文件
                 for percent_complete in range(0, 101, 10):
                     progress_bar.progress(percent_complete)
                     status_text.text(f"处理中... {percent_complete}%")
+
+                    # 调用新模板处理函数
                     if percent_complete == 100:
                         output_path = process_new_template_file(temp_file)
+
+                # 处理完成
                 status_text.text("处理完成！")
                 st.balloons()
+
+                # 提供下载链接
                 with open(output_path, "rb") as f:
                     bytes_data = f.read()
                 b64 = base64.b64encode(bytes_data).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="院校分（艺体类）提取结果.xlsx">点击下载处理结果</a>'
                 st.markdown(href, unsafe_allow_html=True)
+
+                # 清理临时文件
                 os.remove(temp_file)
                 os.remove(output_path)
+
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
 
-elif selected_menu == "📚 学业桥数据处理":
+# ====================== 学业桥数据处理 ======================
+with tab3:
     st.header("学业桥数据处理")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 对学业桥导出的专业分数据进行学校名称匹配、招生专业匹配、备注修正、分数一致性检查，并转换为标准导出格式。
-        **文件要求：** 上传文件必须包含以下列：数据类型、年份、省份、批次、科类、院校名称、院校原始名称、招生代码、专业组编号、专业代码、招生类型、专业名称、报考要求、专业备注、招生计划人数、最低分、最低位次、最高分、平均分、录取人数。
-        **操作步骤：**
-        1. 上传符合要求的Excel文件。
-        2. 点击“开始数据处理”按钮。
-        3. 等待处理完成，下载结果文件。
-        """)
+
+    # 文件上传
     uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="remarks_file")
+
     if uploaded_file is not None:
         st.success(f"已选择文件: {uploaded_file.name}")
+
+        # 显示处理进度
         progress_bar = st.progress(0)
         status_text = st.empty()
         status_text.text("准备处理...")
+
+        # 处理按钮
         if st.button("开始数据处理", key="process_remarks"):
             try:
+                # 保存上传的文件到临时位置
                 temp_file = "temp_remarks.xlsx"
                 with open(temp_file, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+
+
+                # 进度回调函数
                 def update_progress(current, total):
                     percent = int((current / total) * 100)
                     progress_bar.progress(percent)
                     status_text.text(f"处理中... {percent}%")
+
+
+                # 处理文件
                 output_path = process_remarks_file(temp_file, progress_callback=update_progress)
+
+                # 处理完成
                 progress_bar.progress(100)
                 status_text.text("处理完成！")
                 st.balloons()
+
+                # 提供下载链接
                 with open(output_path, "rb") as f:
                     bytes_data = f.read()
                 b64 = base64.b64encode(bytes_data).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="学业桥数据处理结果.xlsx">点击下载处理结果</a>'
                 st.markdown(href, unsafe_allow_html=True)
+
+                # 清理临时文件
                 os.remove(temp_file)
                 os.remove(output_path)
+
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
 
-elif selected_menu == "🧾 招生类型提取":
-    st.header("招生类型提取")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 导入备注列，系统按照优先级从备注中提取招生类型，并检查备注中是否包含“除了”“不含”“除外”“没有”等词语。
-        **输出字段：** 备注、招生类型、需要核查
-        **操作步骤：**
-        1. 上传包含备注列的Excel文件。
-        2. 选择备注列并点击“开始数据处理”。
-        3. 处理完成后下载结果文件。
-        """)
-    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx", "xls"], key="type_extract_file")
-    if uploaded_file is not None:
-        st.success(f"已选择文件: {uploaded_file.name}")
-        try:
-            df = pd.read_excel(uploaded_file)
-        except Exception as e:
-            st.error(f"文件读取失败: {e}")
-            df = None
-
-        if df is not None:
-            remark_columns = [c for c in df.columns if "备注" in str(c)]
-            if not remark_columns:
-                remark_columns = list(df.columns)
-            remark_col = st.selectbox("请选择备注列", remark_columns, index=0)
-            if st.button("开始数据处理", key="process_type_extract"):
-                try:
-                    result_df = process_remark_type_file(df, remark_col)
-                    matched_count = int((result_df['招生类型'] != '').sum())
-                    check_count = int((result_df['需要核查'] == '是').sum())
-                    output_path = "temp_type_extract_result.xlsx"
-                    export_dataframe_to_excel(result_df, output_path)
-                    st.success("处理完成！")
-                    st.info(f"已提取 {matched_count} 条招生类型，{check_count} 条需要核查。")
-                    st.balloons()
-                    with open(output_path, "rb") as f:
-                        bytes_data = f.read()
-                    b64 = base64.b64encode(bytes_data).decode()
-                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="招生类型提取结果.xlsx">点击下载处理结果</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    if os.path.exists(output_path):
-                        os.remove(output_path)
-                except Exception as e:
-                    st.error(f"处理过程中发生错误: {str(e)}")
-
-elif selected_menu == "📈 一分一段校验":
+# ====================== 一分一段校验 ======================
+with tab4:
     st.header("一分一段校验")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 对一分一段数据进行分数连续性校验、累计人数校验，自动补充缺失的分数段，并标注异常。
-        **文件要求：** 文件格式需符合标准一分一段模板（第7行开始为数据），包含分数、人数、累计人数等列。
-        **操作步骤：**
-        1. 上传一分一段Excel文件。
-        2. 点击“开始数据处理”按钮。
-        3. 处理完成后下载校验结果。
-        """)
+
+    # 文件上传
     uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx"], key="segmentation_file")
+
     if uploaded_file is not None:
         st.success(f"已选择文件: {uploaded_file.name}")
+
+        # 显示处理进度
         progress_bar = st.progress(0)
         status_text = st.empty()
         status_text.text("准备处理...")
+
+        # 处理按钮
         if st.button("开始数据处理", key="process_segmentation"):
             try:
+                # 保存上传的文件到临时位置
                 temp_file = "一分一段.xlsx"
                 with open(temp_file, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+
+                # 处理文件
                 for percent_complete in range(0, 101, 10):
                     progress_bar.progress(percent_complete)
                     status_text.text(f"处理中... {percent_complete}%")
+
+                    # 模拟处理过程，实际使用时替换为您的process_segmentation_file函数
                     if percent_complete == 100:
                         output_path = process_segmentation_file(temp_file)
+
+                # 处理完成
                 status_text.text("处理完成！")
                 st.balloons()
+
+                # 提供下载链接
                 with open(output_path, "rb") as f:
                     bytes_data = f.read()
+
                 b64 = base64.b64encode(bytes_data).decode()
+
+                # 从 output_path 提取原文件名（去掉扩展名）
                 base_name = os.path.splitext(os.path.basename(output_path))[0]
+
+                # 拼接新文件名
                 new_filename = f"{base_name}.xlsx"
+
+                # 构造下载链接
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="{new_filename}">点击下载处理结果</a>'
+
                 st.markdown(href, unsafe_allow_html=True)
+
+                # 清理临时文件
                 os.remove(temp_file)
                 os.remove(output_path)
+
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
 
-elif selected_menu == "🔗 专业组代码匹配":
+# ====================== 专业组代码匹配 ======================
+with tab5:
     st.header("专业组代码匹配")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 将专业分导入模板（文件A）与招生计划导出文件（文件B）进行匹配，自动填充专业组代码，未匹配项需手动选择。
-        **文件要求：**
-        - 文件A：专业分导入模板（第3行开始为数据），包含学校名称、省份、招生专业、专业备注、一级层次、招生科类、招生批次、招生类型等。
-        - 文件B：招生计划数据导出文件，包含学校、省份、层次、科类、批次、招生类型、专业、备注、专业组代码等。
-        **操作步骤：**
-        1. 分别上传文件A和文件B。
-        2. 点击“开始数据处理”。
-        3. 查看匹配统计，对于需要手动补充的记录，在下方弹框中逐条选择专业组代码。
-        4. 点击“应用所有选择并完成”，最后下载结果文件。
-        """)
+
     # 初始化session state
     if 'match_result_df' not in st.session_state:
         st.session_state.match_result_df = None
@@ -2497,52 +2572,70 @@ elif selected_menu == "🔗 专业组代码匹配":
 
     uploaded_fileA = st.file_uploader("上传专业分导入模板", type=["xls", "xlsx"], key="fileA")
     uploaded_fileB = st.file_uploader("上传招生计划数据导出文件", type=["xls", "xlsx"], key="fileB")
+
     if uploaded_fileA and uploaded_fileB:
         st.success(f"已选择文件：{uploaded_fileA.name} 和 {uploaded_fileB.name}")
+
         progress_bar = st.progress(0)
         status_text = st.empty()
         status_text.text("等待开始处理...")
+
         if st.button("开始数据处理", key="start_match"):
             try:
+                # 保存临时文件
                 temp_fileA = "tempA.xlsx"
                 temp_fileB = "tempB.xlsx"
                 with open(temp_fileA, "wb") as f:
                     f.write(uploaded_fileA.getbuffer())
                 with open(temp_fileB, "wb") as f:
                     f.write(uploaded_fileB.getbuffer())
+
                 st.session_state.temp_fileA_path = temp_fileA
                 st.session_state.temp_fileB_path = temp_fileB
+
                 status_text.text("读取文件...")
                 progress_bar.progress(10)
+
+                # 读取文件A的标题行（第3行）
                 wbA = openpyxl.load_workbook(temp_fileA, data_only=True)
                 wsA = wbA.active
                 headers_row = []
+                # 读取第3行的所有非空单元格
                 max_col = wsA.max_column
                 for col_idx in range(1, max_col + 1):
                     cell_value = wsA.cell(row=3, column=col_idx).value
                     headers_row.append(cell_value if cell_value is not None else '')
                 wbA.close()
                 st.session_state.fileA_headers = headers_row
+
+                # 读取文件B的年份（从A列年份字段读取）
                 year_value = ''
                 try:
+                    # 先尝试从数据中读取年份字段（A列）
                     dfB_temp = pd.read_excel(temp_fileB)
                     if '年份' in dfB_temp.columns:
                         year_values = dfB_temp['年份'].dropna()
                         if len(year_values) > 0:
                             year_value = year_values.iloc[0]
+                    # 如果年份字段不存在，尝试从A列第一行数据读取
                     elif len(dfB_temp) > 0:
+                        # 尝试读取A列的第一行数据
                         first_col = dfB_temp.iloc[:, 0]
                         if len(first_col) > 0:
                             first_value = first_col.iloc[0]
+                            # 如果第一行数据看起来像年份（4位数字）
                             if first_value and str(first_value).strip().isdigit() and len(str(first_value).strip()) == 4:
                                 year_value = str(first_value).strip()
+                    # 如果还是没找到，尝试从Excel文件的A列读取
                     if not year_value or year_value == '':
                         wbB = openpyxl.load_workbook(temp_fileB, data_only=True)
                         wsB = wbB.active
-                        for row_idx in range(2, min(wsB.max_row + 1, 100)):
+                        # 从A列查找年份（跳过可能的标题行，从第2行开始查找）
+                        for row_idx in range(2, min(wsB.max_row + 1, 100)):  # 最多查找100行
                             cell_value = wsB[f'A{row_idx}'].value
                             if cell_value:
                                 cell_str = str(cell_value).strip()
+                                # 如果看起来像年份（4位数字）
                                 if cell_str.isdigit() and len(cell_str) == 4:
                                     year_value = cell_str
                                     break
@@ -2555,19 +2648,27 @@ elif selected_menu == "🔗 专业组代码匹配":
                     logging.warning(f"读取文件B年份失败：{e}")
                     year_value = ''
                 st.session_state.fileB_year = year_value
+
                 dfA = pd.read_excel(temp_fileA, header=2)
                 dfB = pd.read_excel(temp_fileB)
+
                 status_text.text("开始处理数据...")
                 progress_bar.progress(30)
+
                 result_df, manual_fill_records = process_data(dfA, dfB)
+
                 st.session_state.match_result_df = result_df.copy()
                 st.session_state.manual_fill_records = manual_fill_records
                 st.session_state.manual_selections = {}
+
                 status_text.text("处理完成！")
                 progress_bar.progress(100)
+
+                # 显示统计信息
                 total_count = len(result_df)
                 matched_count = len(result_df[result_df["专业组代码"].notna() & (result_df["专业组代码"] != "")])
                 manual_count = len(manual_fill_records)
+                
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("总记录数", total_count)
@@ -2575,20 +2676,29 @@ elif selected_menu == "🔗 专业组代码匹配":
                     st.metric("自动匹配成功", matched_count)
                 with col3:
                     st.metric("需要手动补充", manual_count, delta=f"{manual_count}条")
+
                 if manual_count > 0:
                     st.warning(f"⚠️ 发现 {manual_count} 条记录需要手动补充专业组代码")
+
             except Exception as e:
                 st.error(f"处理错误：{e}")
                 import traceback
                 st.error(traceback.format_exc())
-        # 显示手动补充界面
+
+        # 显示手动补充界面（弹框形式）
         if st.session_state.match_result_df is not None and len(st.session_state.manual_fill_records) > 0:
             st.markdown("---")
             st.subheader("📝 手动补充专业组代码")
+            
+            # 省份筛选功能
             all_provinces = sorted(set([r.get("省份", "") for r in st.session_state.manual_fill_records if r.get("省份", "")]))
-            all_provinces = [p for p in all_provinces if p]
+            all_provinces = [p for p in all_provinces if p]  # 过滤空值
+            
+            # 初始化省份筛选
             if 'selected_province' not in st.session_state:
                 st.session_state.selected_province = "全部"
+            
+            # 省份筛选框
             col1, col2 = st.columns([1, 3])
             with col1:
                 selected_province = st.selectbox(
@@ -2597,30 +2707,48 @@ elif selected_menu == "🔗 专业组代码匹配":
                     index=0 if st.session_state.selected_province == "全部" else (all_provinces.index(st.session_state.selected_province) + 1 if st.session_state.selected_province in all_provinces else 0),
                     key="province_filter"
                 )
+                # 如果省份筛选改变，重置当前索引
                 if selected_province != st.session_state.selected_province:
                     st.session_state.current_record_idx = 0
                 st.session_state.selected_province = selected_province
+            
+            # 根据省份筛选记录（确保保留所有字段，包括候选记录）
             if selected_province == "全部":
                 filtered_records = st.session_state.manual_fill_records
             else:
+                # 使用列表推导式筛选，确保保留所有字段
                 filtered_records = []
                 for r in st.session_state.manual_fill_records:
                     if r.get("省份", "") == selected_province:
+                        # 确保保留完整的记录，包括候选记录字段
                         filtered_records.append(r)
+            
+            # 显示筛选后的统计信息
             with col2:
                 st.info(f"**筛选结果：** 共 {len(filtered_records)} 条记录需要手动补充（总记录数：{len(st.session_state.manual_fill_records)}）")
+            
             if len(filtered_records) == 0:
                 st.warning(f"⚠️ 省份「{selected_province}」没有需要手动补充的记录")
                 st.stop()
+            
+            # 初始化当前处理的记录索引（基于筛选后的记录）
             if 'current_record_idx' not in st.session_state:
                 st.session_state.current_record_idx = 0
+            
+            # 如果当前索引超出筛选后的记录范围，重置为0
             if st.session_state.current_record_idx >= len(filtered_records):
                 st.session_state.current_record_idx = 0
+            
             total_records = len(filtered_records)
             current_record = filtered_records[st.session_state.current_record_idx]
             idx = current_record["索引"]
             key = f"manual_select_{idx}"
-            if current_record.get("候选记录") is None or (isinstance(current_record.get("候选记录"), list) and len(current_record.get("候选记录")) == 0):
+            
+            # 确保从原始记录中获取完整的候选记录信息
+            # 如果筛选后的记录中候选记录丢失或为空，从原始记录中获取
+            candidate_records_from_filtered = current_record.get("候选记录")
+            if candidate_records_from_filtered is None or (isinstance(candidate_records_from_filtered, list) and len(candidate_records_from_filtered) == 0):
+                # 从原始记录中查找对应的记录
                 original_record = next((r for r in st.session_state.manual_fill_records if r.get("索引") == idx), None)
                 if original_record:
                     original_candidates = original_record.get("候选记录")
@@ -2630,8 +2758,15 @@ elif selected_menu == "🔗 专业组代码匹配":
                         current_record["候选记录"] = []
                 else:
                     current_record["候选记录"] = []
-            progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}" + (f"（省份：{selected_province}）" if selected_province != "全部" else "")
+            
+            # 显示进度
+            if selected_province == "全部":
+                progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}"
+            else:
+                progress_text = f"处理进度：{st.session_state.current_record_idx + 1} / {total_records}（省份：{selected_province}）"
             st.progress((st.session_state.current_record_idx + 1) / total_records, text=progress_text)
+            
+            # 弹框形式显示当前记录
             with st.expander(f"📋 记录 {st.session_state.current_record_idx + 1}：{current_record['学校名称']} - {current_record['招生专业']}", expanded=True):
                 st.markdown("### 当前记录信息（专业分文件）")
                 col1, col2 = st.columns(2)
@@ -2644,45 +2779,65 @@ elif selected_menu == "🔗 专业组代码匹配":
                     st.write(f"**招生科类：** {current_record['招生科类']}")
                     st.write(f"**招生批次：** {current_record['招生批次']}")
                     st.write(f"**招生类型：** {current_record['招生类型（选填）']}")
+                    # 显示当前已选择的值（如果有）
                     current_value = st.session_state.manual_selections.get(key, "")
                     if current_value:
                         st.success(f"**已选择：** {current_value}")
+                
+                # 显示专业备注（选填）字段
                 if current_record.get("专业备注（选填）"):
                     st.markdown("**专业备注（选填）：**")
                     st.info(current_record.get("专业备注（选填）", ""))
+                
                 st.markdown("---")
                 st.markdown("### 招生计划中的候选记录")
+                
+                # 显示候选记录
                 candidate_records = current_record.get("候选记录")
+                # 处理None、空列表等情况
                 if candidate_records is None:
                     candidate_records = []
+                
                 if candidate_records and len(candidate_records) > 0:
+                    # 显示候选记录的详细信息表格
                     st.markdown("**候选记录详情：**")
                     candidate_df = pd.DataFrame(candidate_records)
+                    # 重新排列列的顺序，专业组代码放在最前面
                     if '专业组代码' in candidate_df.columns:
                         cols = ['专业组代码'] + [c for c in candidate_df.columns if c != '专业组代码']
                         candidate_df = candidate_df[cols]
                     st.dataframe(candidate_df, use_container_width=True, hide_index=True)
+                    
+                    # 构建选项列表（显示专业组代码）
                     candidate_options = []
                     for i, cand in enumerate(candidate_records):
                         code = cand.get("专业组代码", "")
                         if code and str(code).strip():
                             candidate_options.append(str(code).strip())
+                    
+                    # 去重
                     candidate_options = list(set(candidate_options))
+                    
                     if candidate_options:
+                        # 添加"请选择"选项
                         options = ["请选择"] + candidate_options
+                        # 获取当前选择（如果有）
                         current_selection = st.session_state.manual_selections.get(key, "请选择")
                         default_index = 0
                         if current_selection in options:
                             default_index = options.index(current_selection)
+                        
                         selected_code = st.selectbox(
                             "选择专业组代码",
                             options,
                             index=default_index,
                             key=key
                         )
+                        
                         if selected_code != "请选择":
                             st.session_state.manual_selections[key] = selected_code
                         else:
+                            # 如果用户选择了"请选择"，清除之前的选择
                             if key in st.session_state.manual_selections:
                                 del st.session_state.manual_selections[key]
                     else:
@@ -2711,6 +2866,8 @@ elif selected_menu == "🔗 专业组代码匹配":
                         st.session_state.manual_selections[key] = manual_input.strip()
                     elif key in st.session_state.manual_selections:
                         del st.session_state.manual_selections[key]
+            
+            # 导航按钮
             col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
             with col1:
                 if st.button("⏮️ 第一条", disabled=st.session_state.current_record_idx == 0):
@@ -2728,10 +2885,14 @@ elif selected_menu == "🔗 专业组代码匹配":
                 if st.button("⏭️ 最后一条", disabled=st.session_state.current_record_idx >= total_records - 1):
                     st.session_state.current_record_idx = total_records - 1
                     st.rerun()
+            
             st.markdown("---")
+            
+            # 应用所有手动选择并完成
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button("✅ 应用当前选择并继续", type="primary", use_container_width=True):
+                    # 应用当前记录的选择
                     selected_code = None
                     if key in st.session_state.manual_selections:
                         selected_code = st.session_state.manual_selections[key]
@@ -2739,23 +2900,33 @@ elif selected_menu == "🔗 专业组代码匹配":
                         input_value = st.session_state[f"{key}_input"]
                         if input_value and input_value.strip():
                             selected_code = input_value.strip()
+                    
                     if selected_code and selected_code.strip():
                         updated_df = st.session_state.match_result_df.copy()
                         updated_df.at[idx, "专业组代码"] = selected_code.strip()
                         st.session_state.match_result_df = updated_df
                         st.success(f"✅ 已应用记录 {st.session_state.current_record_idx + 1} 的选择：{selected_code.strip()}")
+                    
+                    # 移动到下一条
                     if st.session_state.current_record_idx < total_records - 1:
                         st.session_state.current_record_idx += 1
                     st.rerun()
+            
             with col2:
                 if st.button("✅ 应用所有选择并完成", type="primary", use_container_width=True):
+                    # 更新结果数据框
                     updated_df = st.session_state.match_result_df.copy()
                     applied_count = 0
+                    
                     for record in st.session_state.manual_fill_records:
                         idx = record["索引"]
                         key = f"manual_select_{idx}"
                         input_key = f"{key}_input"
+                        
+                        # 检查是否有选择
                         selected_code = None
+                        
+                        # 先检查selectbox的选择
                         if key in st.session_state.manual_selections:
                             selected_code = st.session_state.manual_selections[key]
                             if selected_code == "请选择":
@@ -2764,39 +2935,58 @@ elif selected_menu == "🔗 专业组代码匹配":
                             selected_code = st.session_state[key]
                             if selected_code == "请选择":
                                 selected_code = None
+                        
+                        # 如果没有selectbox选择，检查text_input
                         if not selected_code and input_key in st.session_state:
                             input_value = st.session_state[input_key]
                             if input_value and input_value.strip():
                                 selected_code = input_value.strip()
+                        
+                        # 应用选择
                         if selected_code and selected_code.strip():
                             updated_df.at[idx, "专业组代码"] = selected_code.strip()
                             applied_count += 1
+
                     st.session_state.match_result_df = updated_df
                     if applied_count > 0:
                         st.success(f"✅ 已应用 {applied_count} 条记录的手动选择！")
                     else:
                         st.warning("⚠️ 没有应用任何选择")
                     st.rerun()
+
+        # 导出结果
         if st.session_state.match_result_df is not None:
             st.markdown("---")
             st.subheader("📥 导出结果")
+            
+            # 移除临时列
             export_df = st.session_state.match_result_df.drop(columns=["组合键"], errors='ignore')
+            
+            # 获取标题和年份
             headers = st.session_state.fileA_headers if st.session_state.fileA_headers else list(export_df.columns)
             year_value = st.session_state.fileB_year if st.session_state.fileB_year else ''
+            
+            # 导出结果到临时文件
             temp_output_path = "temp_match_result.xlsx"
             try:
                 export_match_result_to_excel(export_df, headers, year_value, temp_output_path)
+                
+                # 读取文件并转换为base64
                 with open(temp_output_path, "rb") as f:
                     bytes_data = f.read()
                 b64 = base64.b64encode(bytes_data).decode()
                 href = f'<a href="data:application/octet-stream;base64,{b64}" download="专业组代码匹配结果.xlsx">点击下载匹配结果</a>'
                 st.markdown(href, unsafe_allow_html=True)
+                
+                # 清理临时文件
                 if os.path.exists(temp_output_path):
                     os.remove(temp_output_path)
             except Exception as e:
                 st.error(f"导出失败：{str(e)}")
                 import traceback
                 st.error(traceback.format_exc())
+
+            # 清理临时文件按钮
             if st.button("清理临时文件", key="cleanup_temp"):
                 if st.session_state.temp_fileA_path and os.path.exists(st.session_state.temp_fileA_path):
                     os.remove(st.session_state.temp_fileA_path)
@@ -2805,21 +2995,16 @@ elif selected_menu == "🔗 专业组代码匹配":
                 st.session_state.temp_fileA_path = None
                 st.session_state.temp_fileB_path = None
                 st.success("临时文件已清理")
+
     else:
         st.info("请先上传两个Excel文件")
 
-elif selected_menu == "🖼️ 就业质量报告图片提取":
+# ====================== tab5：网页图片提取PDF ======================
+with tab6:
     st.header("就业质量报告图片提取")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 从指定的网页中抓取所有图片（仅支持静态页面），并合成为PDF下载。
-        **操作步骤：**
-        1. 输入就业质量报告网页链接。
-        2. 点击“开始提取图片”按钮。
-        3. 等待抓取完成，预览图片后点击“下载合成PDF”。
-        **注意：** 动态加载的页面或有限制的网页可能无法抓取。
-        """)
+
     url = st.text_input("请输入就业质量报告网页链接", placeholder="例如：https://www.example.com/report.html")
+
     if st.button("开始提取图片"):
         if not url:
             st.warning("请输入有效的网页链接")
@@ -2831,12 +3016,15 @@ elif selected_menu == "🖼️ 就业质量报告图片提取":
                 except Exception as e:
                     st.error(f"抓取失败: {e}")
                     image_paths = []
+
             if image_paths:
                 st.success(f"成功提取到 {len(image_paths)} 张图片")
+
                 with st.expander(f"点击查看 {len(image_paths)} 张图片预览", expanded=False):
                     cols = st.columns(5)
                     for i, path in enumerate(image_paths):
                         cols[i % 5].image(path, width=120)
+
                 pdf_path = os.path.join(output_folder, "图片合集.pdf")
                 if images_to_pdf(image_paths, pdf_path):
                     with open(pdf_path, "rb") as f:
@@ -2846,19 +3034,81 @@ elif selected_menu == "🖼️ 就业质量报告图片提取":
             else:
                 st.warning("未抓取到任何图片")
 
-elif selected_menu == "📊 招生计划数据比对":
+
+
+
+
+# ====================== 备注招生类型提取 ======================
+with tab8:
+    st.header("备注招生类型提取")
+    st.markdown(
+        "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
+    )
+
+    uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
+    if uploaded_file is not None:
+        uploaded_bytes = uploaded_file.getvalue()
+        try:
+            df = pd.read_excel(BytesIO(uploaded_bytes), header=0, keep_default_na=False)
+        except Exception as e:
+            st.error(f"读取文件失败：{e}")
+        else:
+            columns = list(df.columns)
+            if not columns:
+                st.warning("上传文件未检测到列名，请检查文件格式")
+            else:
+                default_index = 0
+                for idx, col in enumerate(columns):
+                    if "备注" in str(col):
+                        default_index = idx
+                        break
+                remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
+                type_keywords_text = st.text_area(
+                    "招生类型关键词（按优先级从上到下填写，每行一个）",
+                    value=DEFAULT_REMARK_TYPE_KEYWORDS,
+                    height=240
+                )
+                st.markdown(
+                    "提示：备注中若包含“除了”、“不含”、“除外”、“没有”，输出结果中“需要核查”会标记为“是”。"
+                )
+
+                if st.button("开始提取招生类型", key="process_remark_type"):
+                    type_keywords = parse_recruitment_type_keywords(type_keywords_text)
+                    if not type_keywords:
+                        st.warning("请先填写至少一个招生类型关键词")
+                    else:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        status_text.text("处理中...")
+                        temp_file = "temp_remark_type.xlsx"
+                        output_path = None
+                        try:
+                            with open(temp_file, "wb") as f:
+                                f.write(uploaded_bytes)
+                            output_path = process_remark_type_file(temp_file, remark_col, type_keywords)
+                            progress_bar.progress(100)
+                            status_text.text("处理完成！")
+                            st.balloons()
+
+                            with open(output_path, "rb") as f:
+                                bytes_data = f.read()
+                            b64 = base64.b64encode(bytes_data).decode()
+                            href = f'<a href="data:application/octet-stream;base64,{b64}" download="备注招生类型提取结果.xlsx">点击下载处理结果</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"处理过程中发生错误: {str(e)}")
+                        finally:
+                            if os.path.exists(temp_file):
+                                os.remove(temp_file)
+                            if output_path and os.path.exists(output_path):
+                                os.remove(output_path)
+
+
+# ====================== tab7：招生计划工具======================
+with tab7:
     st.header("招生计划数据比对与转换工具")
-    with st.expander("📖 使用说明", expanded=False):
-        st.markdown("""
-        **功能说明：** 上传招生计划、专业分和院校分文件，进行数据比对，并导出未匹配数据为专业分/院校分格式。
-        **比对逻辑：**
-        - 比对1（招生计划 vs 专业分）：匹配字段：年份、省份、学校、科类、批次、专业、层次、专业组代码
-        - 比对2（招生计划 vs 院校分）：匹配字段：省份、学校、科类、批次、专业组代码、招生代码
-        **操作步骤：**
-        1. 分别上传招生计划、专业分、院校分文件（院校分可选，但导出院校分格式需要）。
-        2. 点击对应的比对按钮查看结果。
-        3. 在结果中可筛选、查看，并导出全部结果或未匹配数据（专业分/院校分格式）。
-        """)
+    st.markdown("上传招生计划、专业分和院校分文件进行比对，导出未匹配数据为专业分/院校分格式")
+
     # 初始化session state
     if 'plan_data' not in st.session_state:
         st.session_state.plan_data = None
@@ -2870,7 +3120,46 @@ elif selected_menu == "📊 招生计划数据比对":
         st.session_state.plan_score_results = []
     if 'plan_college_results' not in st.session_state:
         st.session_state.plan_college_results = []
+
+    # 工作流步骤显示
+    col1, col2, col3, col4, col5 = st.columns([1, 0.3, 1, 0.3, 1])
+    with col1:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #e3f2fd; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">1</div>
+            <div>上传文件</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">2</div>
+            <div>数据比对</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col5:
+        st.markdown("""
+        <div style="text-align: center; padding: 10px; background: #f5f5f5; border-radius: 10px;">
+            <div style="font-size: 24px; font-weight: bold;">3</div>
+            <div>导出未匹配数据</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # 字段说明
+    with st.expander("📋 比对字段说明", expanded=False):
+        st.markdown("""
+        **比对1（招生计划 vs 专业分）：** 检查招生计划的记录是否在专业分中存在
+        - 匹配字段：年份、省份、学校、科类、批次、专业、层次、专业组代码
+
+        **比对2（招生计划 vs 院校分）：** 检查招生计划的记录是否在院校分中存在
+        - 匹配字段：年份、省份、学校、科类、批次、专业组代码
+        """)
+
+    # 文件上传区域
     col1, col2, col3 = st.columns(3)
+
     with col1:
         st.subheader("招生计划文件")
         plan_file = st.file_uploader("上传招生计划文件", type=["xlsx", "xls"], key="tab7_plan_file")
@@ -2881,6 +3170,7 @@ elif selected_menu == "📊 招生计划数据比对":
                 st.success(f"✓ 文件加载成功\n文件名: {plan_file.name}\n记录数: {len(plan_df)} 条")
             except Exception as e:
                 st.error(f"❌ 文件读取失败: {str(e)}")
+
     with col2:
         st.subheader("专业分文件")
         score_file = st.file_uploader("上传专业分文件", type=["xlsx", "xls"], key="tab7_score_file")
@@ -2891,6 +3181,7 @@ elif selected_menu == "📊 招生计划数据比对":
                 st.success(f"✓ 文件加载成功\n文件名: {score_file.name}\n记录数: {len(score_df)} 条")
             except Exception as e:
                 st.error(f"❌ 文件读取失败: {str(e)}")
+
     with col3:
         st.subheader("院校分文件")
         college_file = st.file_uploader("上传院校分文件", type=["xlsx", "xls"], key="tab7_college_file")
@@ -2901,7 +3192,10 @@ elif selected_menu == "📊 招生计划数据比对":
                 st.success(f"✓ 文件加载成功\n文件名: {college_file.name}\n记录数: {len(college_df)} 条")
             except Exception as e:
                 st.error(f"❌ 文件读取失败: {str(e)}")
+
     st.markdown("---")
+
+    # 比对按钮
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     with col1:
         compare_plan_score_btn = st.button("比对1：招生计划 vs 专业分", type="primary", use_container_width=True)
@@ -2911,6 +3205,8 @@ elif selected_menu == "📊 招生计划数据比对":
         compare_all_btn = st.button("全部比对", type="primary", use_container_width=True)
     with col4:
         reset_btn = st.button("重置", use_container_width=True)
+
+    # 执行比对
     if compare_plan_score_btn:
         if st.session_state.plan_data is None:
             st.error("请先上传招生计划文件")
@@ -2923,6 +3219,7 @@ elif selected_menu == "📊 招生计划数据比对":
                 )
             st.success("比对1完成！")
             st.balloons()
+
     if compare_plan_college_btn:
         if st.session_state.plan_data is None:
             st.error("请先上传招生计划文件")
@@ -2935,12 +3232,14 @@ elif selected_menu == "📊 招生计划数据比对":
                 )
             st.success("比对2完成！")
             st.balloons()
+
     if compare_all_btn:
         comparisons = []
         if st.session_state.plan_data is not None and st.session_state.score_data is not None:
             comparisons.append("比对1")
         if st.session_state.plan_data is not None and st.session_state.college_data is not None:
             comparisons.append("比对2")
+
         if len(comparisons) == 0:
             st.error("请至少上传两个文件以进行比对")
         else:
@@ -2955,6 +3254,7 @@ elif selected_menu == "📊 招生计划数据比对":
                     )
             st.success("全部比对完成！")
             st.balloons()
+
     if reset_btn:
         st.session_state.plan_data = None
         st.session_state.score_data = None
@@ -2963,12 +3263,18 @@ elif selected_menu == "📊 招生计划数据比对":
         st.session_state.plan_college_results = []
         st.success("重置完成！")
         st.rerun()
+
+    # 显示比对结果
     if len(st.session_state.plan_score_results) > 0 or len(st.session_state.plan_college_results) > 0:
         st.markdown("---")
+
+        # 创建标签页
         tab_plan_score, tab_plan_college = st.tabs([
             "比对1：招生计划 vs 专业分",
             "比对2：招生计划 vs 院校分"
         ])
+
+        # 比对1结果
         with tab_plan_score:
             if len(st.session_state.plan_score_results) > 0:
                 results = st.session_state.plan_score_results
@@ -2976,6 +3282,8 @@ elif selected_menu == "📊 招生计划数据比对":
                 matched = sum(1 for r in results if r['exists'])
                 unmatched = total - matched
                 rate = (matched / total * 100) if total > 0 else 0
+
+                # 统计信息
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("总记录数", total)
@@ -2985,6 +3293,8 @@ elif selected_menu == "📊 招生计划数据比对":
                     st.metric("未匹配记录数", unmatched)
                 with col4:
                     st.metric("匹配率", f"{rate:.1f}%")
+
+                # 筛选控件
                 st.markdown("### 筛选条件")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -2997,6 +3307,8 @@ elif selected_menu == "📊 招生计划数据比对":
                     match_status_filter = st.selectbox("匹配状态", ["全部", "匹配", "未匹配"], key="ps_status")
                 with col4:
                     display_option = st.selectbox("显示选项", ["全部", "前100条", "前500条"], key="ps_display")
+
+                # 应用筛选
                 filtered_results = results
                 if province_filter != "全部":
                     filtered_results = [r for r in filtered_results if r['keyFields']['省份'] == province_filter]
@@ -3006,14 +3318,20 @@ elif selected_menu == "📊 招生计划数据比对":
                     filtered_results = [r for r in filtered_results if r['exists']]
                 elif match_status_filter == "未匹配":
                     filtered_results = [r for r in filtered_results if not r['exists']]
+
                 display_count = len(filtered_results)
                 if display_option == "前100条":
                     display_count = min(100, len(filtered_results))
                 elif display_option == "前500条":
                     display_count = min(500, len(filtered_results))
-                st.markdown(f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
+
+                # 显示表格
+                st.markdown(
+                    f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
                 display_results = filtered_results[:display_count]
+
                 if len(display_results) > 0:
+                    # 准备表格数据
                     table_data = []
                     for r in display_results:
                         table_data.append({
@@ -3029,8 +3347,11 @@ elif selected_menu == "📊 招生计划数据比对":
                             '招生人数': r['otherInfo']['招生人数'] or '-',
                             '匹配状态': '✓ 存在' if r['exists'] else '✗ 不存在'
                         })
+
                     df_display = pd.DataFrame(table_data)
                     st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                # 导出按钮
                 if st.button("导出比对1结果", key="export_ps", use_container_width=True):
                     try:
                         export_data = []
@@ -3052,9 +3373,11 @@ elif selected_menu == "📊 招生计划数据比对":
                                 '匹配状态': '存在' if r['exists'] else '不存在',
                                 '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
                             })
+
                         output = BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+
                         output.seek(0)
                         st.download_button(
                             "📥 下载比对1结果",
@@ -3066,6 +3389,8 @@ elif selected_menu == "📊 招生计划数据比对":
                         st.error(f"导出失败: {str(e)}")
             else:
                 st.info("暂无比对结果，请先执行比对")
+
+        # 比对2结果
         with tab_plan_college:
             if len(st.session_state.plan_college_results) > 0:
                 results = st.session_state.plan_college_results
@@ -3073,6 +3398,8 @@ elif selected_menu == "📊 招生计划数据比对":
                 matched = sum(1 for r in results if r['exists'])
                 unmatched = total - matched
                 rate = (matched / total * 100) if total > 0 else 0
+
+                # 统计信息
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("总记录数", total)
@@ -3082,6 +3409,8 @@ elif selected_menu == "📊 招生计划数据比对":
                     st.metric("未匹配记录数", unmatched)
                 with col4:
                     st.metric("匹配率", f"{rate:.1f}%")
+
+                # 筛选控件
                 st.markdown("### 筛选条件")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -3094,6 +3423,8 @@ elif selected_menu == "📊 招生计划数据比对":
                     match_status_filter = st.selectbox("匹配状态", ["全部", "匹配", "未匹配"], key="pc_status")
                 with col4:
                     display_option = st.selectbox("显示选项", ["全部", "前100条", "前500条"], key="pc_display")
+
+                # 应用筛选
                 filtered_results = results
                 if province_filter != "全部":
                     filtered_results = [r for r in filtered_results if r['keyFields']['省份'] == province_filter]
@@ -3103,14 +3434,20 @@ elif selected_menu == "📊 招生计划数据比对":
                     filtered_results = [r for r in filtered_results if r['exists']]
                 elif match_status_filter == "未匹配":
                     filtered_results = [r for r in filtered_results if not r['exists']]
+
                 display_count = len(filtered_results)
                 if display_option == "前100条":
                     display_count = min(100, len(filtered_results))
                 elif display_option == "前500条":
                     display_count = min(500, len(filtered_results))
-                st.markdown(f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
+
+                # 显示表格
+                st.markdown(
+                    f"### 比对结果（显示 {min(display_count, len(filtered_results))} / {len(filtered_results)} 条）")
                 display_results = filtered_results[:display_count]
+
                 if len(display_results) > 0:
+                    # 准备表格数据
                     table_data = []
                     for r in display_results:
                         table_data.append({
@@ -3124,8 +3461,11 @@ elif selected_menu == "📊 招生计划数据比对":
                             '专业': r['otherInfo']['专业'] or '-',
                             '匹配状态': '✓ 存在' if r['exists'] else '✗ 不存在'
                         })
+
                     df_display = pd.DataFrame(table_data)
                     st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                # 导出按钮
                 if st.button("导出比对2结果", key="export_pc", use_container_width=True):
                     try:
                         export_data = []
@@ -3145,9 +3485,11 @@ elif selected_menu == "📊 招生计划数据比对":
                                 '匹配状态': '存在' if r['exists'] else '不存在',
                                 '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
                             })
+
                         output = BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+
                         output.seek(0)
                         st.download_button(
                             "📥 下载比对2结果",
@@ -3159,20 +3501,28 @@ elif selected_menu == "📊 招生计划数据比对":
                         st.error(f"导出失败: {str(e)}")
             else:
                 st.info("暂无比对结果，请先执行比对")
+
+        # 全局导出区域
         if len(st.session_state.plan_score_results) > 0 or len(st.session_state.plan_college_results) > 0:
             st.markdown("---")
             st.markdown("### 📤 全局导出功能")
+
+            # 收集所有未匹配的数据
             all_unmatched_results = []
             if len(st.session_state.plan_score_results) > 0:
                 all_unmatched_results.extend([r for r in st.session_state.plan_score_results if not r['exists']])
             if len(st.session_state.plan_college_results) > 0:
                 all_unmatched_results.extend([r for r in st.session_state.plan_college_results if not r['exists']])
+
+            # 使用三列布局，添加院校分格式导出
             col1, col2, col3 = st.columns([1, 1, 1])
+
             with col1:
                 if st.button("📊 导出全部结果", use_container_width=True):
                     try:
                         output = BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            # 比对1结果
                             if len(st.session_state.plan_score_results) > 0:
                                 export_data = []
                                 for r in st.session_state.plan_score_results:
@@ -3193,7 +3543,10 @@ elif selected_menu == "📊 招生计划数据比对":
                                         '匹配状态': '存在' if r['exists'] else '不存在',
                                         '匹配说明': '该记录在专业分文件中存在' if r['exists'] else '该记录在专业分文件中不存在'
                                     })
-                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对1_招生计划vs专业分')
+                                pd.DataFrame(export_data).to_excel(writer, index=False,
+                                                                   sheet_name='比对1_招生计划vs专业分')
+
+                            # 比对2结果
                             if len(st.session_state.plan_college_results) > 0:
                                 export_data = []
                                 for r in st.session_state.plan_college_results:
@@ -3212,7 +3565,10 @@ elif selected_menu == "📊 招生计划数据比对":
                                         '匹配状态': '存在' if r['exists'] else '不存在',
                                         '匹配说明': '该记录在院校分文件中存在' if r['exists'] else '该记录在院校分文件中不存在'
                                     })
-                                pd.DataFrame(export_data).to_excel(writer, index=False, sheet_name='比对2_招生计划vs院校分')
+                                pd.DataFrame(export_data).to_excel(writer, index=False,
+                                                                   sheet_name='比对2_招生计划vs院校分')
+
+                            # 统计报告
                             summary_data = {
                                 '比对类型': ['比对1：招生计划 vs 专业分', '比对2：招生计划 vs 院校分'],
                                 '总记录数': [
@@ -3224,11 +3580,14 @@ elif selected_menu == "📊 招生计划数据比对":
                                     sum(1 for r in st.session_state.plan_college_results if r['exists'])
                                 ],
                                 '匹配率': [
-                                    f"{(sum(1 for r in st.session_state.plan_score_results if r['exists']) / len(st.session_state.plan_score_results) * 100):.1f}%" if len(st.session_state.plan_score_results) > 0 else "0%",
-                                    f"{(sum(1 for r in st.session_state.plan_college_results if r['exists']) / len(st.session_state.plan_college_results) * 100):.1f}%" if len(st.session_state.plan_college_results) > 0 else "0%"
+                                    f"{(sum(1 for r in st.session_state.plan_score_results if r['exists']) / len(st.session_state.plan_score_results) * 100):.1f}%" if len(
+                                        st.session_state.plan_score_results) > 0 else "0%",
+                                    f"{(sum(1 for r in st.session_state.plan_college_results if r['exists']) / len(st.session_state.plan_college_results) * 100):.1f}%" if len(
+                                        st.session_state.plan_college_results) > 0 else "0%"
                                 ]
                             }
                             pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='统计报告')
+
                         output.seek(0)
                         st.download_button(
                             "📥 下载全部结果",
@@ -3238,24 +3597,35 @@ elif selected_menu == "📊 招生计划数据比对":
                         )
                     except Exception as e:
                         st.error(f"导出失败: {str(e)}")
+
             with col2:
                 if len(all_unmatched_results) > 0:
                     if st.button("⭐ 导出未匹配数据为专业分格式", type="primary", use_container_width=True):
                         try:
+                            # 提取真正未匹配的原始数据：
+                            # - 若两个比对都已执行，则只导出在两次比对中均未匹配的记录（交集）
+                            # - 若仅执行其中一次比对，则导出该次比对未匹配的记录
                             plan_score_unmatched = set(r['originalIndex'] for r in st.session_state.plan_score_results if not r['exists']) if len(st.session_state.plan_score_results) > 0 else set()
                             plan_college_unmatched = set(r['originalIndex'] for r in st.session_state.plan_college_results if not r['exists']) if len(st.session_state.plan_college_results) > 0 else set()
+
                             if plan_score_unmatched and plan_college_unmatched:
                                 target_indices = plan_score_unmatched & plan_college_unmatched
                             elif plan_score_unmatched:
                                 target_indices = plan_score_unmatched
                             else:
                                 target_indices = plan_college_unmatched
+
+                            # 去重并按原序输出
                             conversion_data = []
                             for idx in sorted(target_indices):
                                 conversion_data.append(st.session_state.plan_data.iloc[idx].to_dict())
+
+                            # 转换为完整的专业分格式
                             converted_data = convert_data(conversion_data)
+
                             temp_path = "temp_converted.xlsx"
                             export_converted_data_to_excel(converted_data, conversion_data, temp_path)
+
                             with open(temp_path, 'rb') as f:
                                 st.download_button(
                                     "📥 下载转换后的专业分数据",
@@ -3263,29 +3633,42 @@ elif selected_menu == "📊 招生计划数据比对":
                                     file_name=f"专业分数据_未匹配数据_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
+
                             os.remove(temp_path)
                             st.success(f"转换完成！共转换 {len(converted_data)} 条数据（已去重）")
                         except Exception as e:
                             st.error(f"转换失败: {str(e)}")
                 else:
                     st.info("暂无未匹配数据")
+
             with col3:
                 if len(all_unmatched_results) > 0:
                     if st.button("⭐ 导出未匹配数据为院校分格式", type="primary", use_container_width=True):
                         try:
+                            # 检查是否有院校分数据
                             if 'college_data' not in st.session_state or st.session_state.college_data is None:
                                 st.error("请先上传院校分文件，以便进行比对过滤")
                             else:
+                                # 提取原始招生计划数据
                                 plan_df = st.session_state.plan_data.copy()
                                 college_df = st.session_state.college_data.copy()
+                                
+                                # 使用新的过滤函数，只导出招生计划中不存在于院校分的数据
                                 unmatched_records = filter_unmatched_plan_data_for_college_export(plan_df, college_df)
+                                
                                 if len(unmatched_records) == 0:
                                     st.warning("⚠️ 所有招生计划数据都已存在于院校分中，无需转换")
                                 else:
+                                    # 提取未匹配数据
                                     conversion_data = [r['data'] for r in unmatched_records]
+                                    
+                                    # 转换数据为院校分格式
                                     college_score_data = convert_to_college_score_format(conversion_data)
+                                    
+                                    # 导出
                                     temp_path = "temp_college_score.xlsx"
                                     export_college_score_data_to_excel(college_score_data, conversion_data, temp_path)
+                                    
                                     with open(temp_path, 'rb') as f:
                                         st.download_button(
                                             "📥 下载转换后的院校分数据",
@@ -3293,6 +3676,7 @@ elif selected_menu == "📊 招生计划数据比对":
                                             file_name=f"院校分数据_未匹配数据导出{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                         )
+                                    
                                     os.remove(temp_path)
                                     st.success(f"转换完成！共转换 {len(college_score_data)} 条数据")
                         except Exception as e:
@@ -3304,4 +3688,4 @@ elif selected_menu == "📊 招生计划数据比对":
 
 # 页脚
 st.markdown("---")
-st.markdown("© 数据处理工具", unsafe_allow_html=True)
+st.markdown("© 数据处理", unsafe_allow_html=True)
