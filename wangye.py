@@ -765,38 +765,88 @@ def _find_remark_column(df):
     return None
 
 
-DEFAULT_REMARK_TYPE_KEYWORDS = """中外合作
-中外高水平大学生交流计划
-学分互认联合培养项目
-地方专项
-国家专项
-高校专项
-艺术类
-闽台合作
-预科
-定向
-护理类
-民族班
-联合办学
-联办
-建档立卡专项
-藏区专项
-少数民族紧缺人才培养专项
-民语类及对等培养"""
+DEFAULT_REMARK_TYPE_MAPPING = [
+    {"备注查找字段": "中外合作", "输出招生类型": "中外合作", "优先级": 1},
+    {"备注查找字段": "中外高水平大学生交流计划", "输出招生类型": "中外高水平大学生交流计划", "优先级": 2},
+    {"备注查找字段": "学分互认联合培养项目", "输出招生类型": "学分互认联合培养项目", "优先级": 3},
+    {"备注查找字段": "地方专项", "输出招生类型": "地方专项", "优先级": 4},
+    {"备注查找字段": "国家专项", "输出招生类型": "国家专项", "优先级": 5},
+    {"备注查找字段": "高校专项", "输出招生类型": "高校专项", "优先级": 6},
+    {"备注查找字段": "艺术类", "输出招生类型": "艺术类", "优先级": 7},
+    {"备注查找字段": "闽台合作", "输出招生类型": "闽台合作", "优先级": 8},
+    {"备注查找字段": "预科", "输出招生类型": "预科", "优先级": 9},
+    {"备注查找字段": "定向", "输出招生类型": "定向", "优先级": 10},
+    {"备注查找字段": "护理类", "输出招生类型": "护理类", "优先级": 11},
+    {"备注查找字段": "民族班", "输出招生类型": "民族班", "优先级": 12},
+    {"备注查找字段": "联合办学", "输出招生类型": "联合办学", "优先级": 13},
+    {"备注查找字段": "联办", "输出招生类型": "联办", "优先级": 14},
+    {"备注查找字段": "建档立卡专项", "输出招生类型": "建档立卡专项", "优先级": 15},
+    {"备注查找字段": "藏区专项", "输出招生类型": "藏区专项", "优先级": 16},
+    {"备注查找字段": "少数民族紧缺人才培养专项", "输出招生类型": "少数民族紧缺人才培养专项", "优先级": 17},
+    {"备注查找字段": "民语类及对等培养", "输出招生类型": "民语类及对等培养", "优先级": 18},
+]
+DEFAULT_REMARK_TYPE_MAPPING_TEXT = "备注查找字段\t输出招生类型\t优先级\n" + "\n".join(
+    [f"{item['备注查找字段']}\t{item['输出招生类型']}\t{item['优先级']}" for item in DEFAULT_REMARK_TYPE_MAPPING]
+)
 EXCLUSION_KEYWORDS = ["除了", "不含", "除外", "没有"]
 
 
-def parse_recruitment_type_keywords(text):
-    return [line.strip() for line in str(text).splitlines() if line.strip()]
+def get_default_remark_type_mapping_df():
+    return pd.DataFrame(DEFAULT_REMARK_TYPE_MAPPING)
 
 
-def extract_recruitment_type(remark, type_keywords):
+def parse_recruitment_type_mapping_text(text):
+    mappings = []
+    for line in str(text).splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in re.split(r'[\t|]+', line) if p.strip()]
+        if len(parts) < 2:
+            continue
+        remark_key = parts[0]
+        output_type = parts[1]
+        priority = None
+        if len(parts) >= 3:
+            try:
+                priority = int(parts[2])
+            except ValueError:
+                priority = None
+        mappings.append({
+            '备注查找字段': remark_key,
+            '输出招生类型': output_type,
+            '优先级': priority
+        })
+    return mappings
+
+
+def normalize_remark_type_mappings(mapping_df):
+    mappings = []
+    for _, row in mapping_df.iterrows():
+        remark_key = str(row.get('备注查找字段', '') or '').strip()
+        output_type = str(row.get('输出招生类型', '') or '').strip()
+        priority = row.get('优先级', None)
+        if not remark_key or not output_type:
+            continue
+        try:
+            priority = int(priority)
+        except Exception:
+            priority = None
+        mappings.append({
+            '备注查找字段': remark_key,
+            '输出招生类型': output_type,
+            '优先级': priority
+        })
+    mappings.sort(key=lambda item: (item['优先级'] is None, item['优先级'] if item['优先级'] is not None else 9999))
+    return mappings
+
+
+def extract_recruitment_type(remark, mappings):
     if pd.isna(remark) or not str(remark).strip():
         return ''
     remark_text = str(remark)
-    for keyword in type_keywords:
-        if keyword and keyword in remark_text:
-            return keyword
+    for item in mappings:
+        if item['备注查找字段'] and item['备注查找字段'] in remark_text:
+            return item['输出招生类型']
     return ''
 
 
@@ -807,7 +857,7 @@ def remark_needs_review(remark):
     return '是' if any(word in remark_text for word in EXCLUSION_KEYWORDS) else '否'
 
 
-def process_remark_type_file(file_path, remark_col, type_keywords, progress_callback=None):
+def process_remark_type_file(file_path, remark_col, mappings, progress_callback=None):
     try:
         df = pd.read_excel(file_path, header=0, keep_default_na=False)
     except Exception as e:
@@ -818,7 +868,7 @@ def process_remark_type_file(file_path, remark_col, type_keywords, progress_call
 
     result_df = pd.DataFrame({
         '备注': df[remark_col].apply(lambda x: '' if pd.isna(x) else str(x)),
-        '招生类型': df[remark_col].apply(lambda x: extract_recruitment_type(x, type_keywords)),
+        '招生类型': df[remark_col].apply(lambda x: extract_recruitment_type(x, mappings)),
         '需要核查': df[remark_col].apply(remark_needs_review)
     })
 
@@ -3044,15 +3094,28 @@ with tab8:
     st.markdown(
         "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
     )
-
-    type_keywords_text = st.text_area(
-        "招生类型关键词（按优先级从上到下填写，每行一个）",
-        value=DEFAULT_REMARK_TYPE_KEYWORDS,
-        height=240
-    )
     st.markdown(
-        "提示：请先填写关键词列表，再上传备注文件。备注中若包含“除了”、“不含”、“除外”、“没有”，输出结果中“需要核查”会标记为“是”。"
+        "请先配置映射规则：备注查找字段、输出招生类型、优先级。优先级数值越小，匹配顺序越靠前。"
     )
+
+    default_mapping_df = get_default_remark_type_mapping_df()
+    try:
+        mapping_df = st.experimental_data_editor(
+            default_mapping_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="remark_type_mapping_editor"
+        )
+        mappings = normalize_remark_type_mappings(mapping_df)
+    except Exception:
+        st.warning("当前 Streamlit 版本不支持可编辑表格，请使用文本方式输入映射规则。")
+        mapping_text = st.text_area(
+            "请输入映射规则（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
+            value=DEFAULT_REMARK_TYPE_MAPPING_TEXT,
+            height=240
+        )
+        mappings = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
+        mappings = normalize_remark_type_mappings(mappings)
 
     uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
     if uploaded_file is not None:
@@ -3074,9 +3137,8 @@ with tab8:
                 remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
 
                 if st.button("开始提取招生类型", key="process_remark_type"):
-                    type_keywords = parse_recruitment_type_keywords(type_keywords_text)
-                    if not type_keywords:
-                        st.warning("请先填写至少一个招生类型关键词")
+                    if not mappings:
+                        st.warning("请先填写至少一个映射规则")
                     else:
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -3086,7 +3148,7 @@ with tab8:
                         try:
                             with open(temp_file, "wb") as f:
                                 f.write(uploaded_bytes)
-                            output_path = process_remark_type_file(temp_file, remark_col, type_keywords)
+                            output_path = process_remark_type_file(temp_file, remark_col, mappings)
                             progress_bar.progress(100)
                             status_text.text("处理完成！")
                             st.balloons()
