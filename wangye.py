@@ -125,6 +125,65 @@ def _get_first_subject(category):
     return ''
 
 
+PRIORITY_REMARK_TYPES = [
+    ("中外合作", "中外合作办学"),
+    ("中外高水平大学学生交流计划", "中外高水平大学学生交流计划"),
+    ("学分互认联合培养项目", "学分互认联合培养项目"),
+    ("地方专项", "地方专项计划"),
+    ("国家专项", "国家专项计划"),
+    ("高校专项", "高校专项计划"),
+    ("艺术类", "艺术类"),
+    ("闽台合作", "闽台合作"),
+    ("预科", "预科"),
+    ("定向", "定向"),
+    ("护理类", "护理类"),
+    ("民族班", "民族班"),
+    ("联合办学", "联合办学"),
+    ("联办", "联合办学"),
+    ("建档立卡专项", "建档立卡专项"),
+    ("藏区专项", "藏区专项"),
+    ("少数民族紧缺人才培养专项", "少数民族紧缺人才培养专项"),
+    ("民语类及对等培养", "民语类及对等培养")
+]
+SPECIAL_CHECK_PHRASES = ["除了", "不含", "除外", "没有"]
+
+
+def extract_enrollment_type_from_remark(remark):
+    if pd.isna(remark):
+        return ''
+    text = str(remark).strip()
+    for keyword, output in PRIORITY_REMARK_TYPES:
+        if keyword in text:
+            return output
+    return ''
+
+
+def remark_needs_check(remark):
+    if pd.isna(remark):
+        return False
+    text = str(remark)
+    return any(phrase in text for phrase in SPECIAL_CHECK_PHRASES)
+
+
+def process_remark_type_file(df, remark_col):
+    output_rows = []
+    for _, row in df.iterrows():
+        remark = row.get(remark_col, '')
+        zhaosheng_type = extract_enrollment_type_from_remark(remark)
+        need_check = '是' if remark_needs_check(remark) else '否'
+        output_rows.append({
+            '备注': remark if pd.notna(remark) else '',
+            '招生类型': zhaosheng_type,
+            '需要核查': need_check
+        })
+    return pd.DataFrame(output_rows, columns=['备注', '招生类型', '需要核查'])
+
+
+def export_dataframe_to_excel(df, output_path, sheet_name='Sheet1'):
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+
 def _normalize_kele(kele):
     """转换招生科类：物理→物理类，历史→历史类，其他科类直接返回。"""
     if kele is None or (isinstance(kele, str) and not kele.strip()):
@@ -2169,6 +2228,7 @@ with st.sidebar:
         "🏫 院校分提取（普通类）",
         "🎨 院校分提取（艺体类）",
         "📚 学业桥数据处理",
+        "🧾 招生类型提取",
         "📈 一分一段校验",
         "🔗 专业组代码匹配",
         "🖼️ 就业质量报告图片提取",
@@ -2318,6 +2378,51 @@ elif selected_menu == "📚 学业桥数据处理":
                 os.remove(output_path)
             except Exception as e:
                 st.error(f"处理过程中发生错误: {str(e)}")
+
+elif selected_menu == "🧾 招生类型提取":
+    st.header("招生类型提取")
+    with st.expander("📖 使用说明", expanded=False):
+        st.markdown("""
+        **功能说明：** 导入备注列，系统按照优先级从备注中提取招生类型，并检查备注中是否包含“除了”“不含”“除外”“没有”等词语。
+        **输出字段：** 备注、招生类型、需要核查
+        **操作步骤：**
+        1. 上传包含备注列的Excel文件。
+        2. 选择备注列并点击“开始数据处理”。
+        3. 处理完成后下载结果文件。
+        """)
+    uploaded_file = st.file_uploader("选择Excel文件", type=["xlsx", "xls"], key="type_extract_file")
+    if uploaded_file is not None:
+        st.success(f"已选择文件: {uploaded_file.name}")
+        try:
+            df = pd.read_excel(uploaded_file)
+        except Exception as e:
+            st.error(f"文件读取失败: {e}")
+            df = None
+
+        if df is not None:
+            remark_columns = [c for c in df.columns if "备注" in str(c)]
+            if not remark_columns:
+                remark_columns = list(df.columns)
+            remark_col = st.selectbox("请选择备注列", remark_columns, index=0)
+            if st.button("开始数据处理", key="process_type_extract"):
+                try:
+                    result_df = process_remark_type_file(df, remark_col)
+                    matched_count = int((result_df['招生类型'] != '').sum())
+                    check_count = int((result_df['需要核查'] == '是').sum())
+                    output_path = "temp_type_extract_result.xlsx"
+                    export_dataframe_to_excel(result_df, output_path)
+                    st.success("处理完成！")
+                    st.info(f"已提取 {matched_count} 条招生类型，{check_count} 条需要核查。")
+                    st.balloons()
+                    with open(output_path, "rb") as f:
+                        bytes_data = f.read()
+                    b64 = base64.b64encode(bytes_data).decode()
+                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="招生类型提取结果.xlsx">点击下载处理结果</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    if os.path.exists(output_path):
+                        os.remove(output_path)
+                except Exception as e:
+                    st.error(f"处理过程中发生错误: {str(e)}")
 
 elif selected_menu == "📈 一分一段校验":
     st.header("一分一段校验")
