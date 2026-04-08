@@ -3103,9 +3103,9 @@ with tab8:
         value=DEFAULT_REMARK_TYPE_MAPPING_TEXT,
         height=240
     )
-    mappings = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
-    mappings = normalize_remark_type_mappings(mappings)
-    if not mappings.empty:
+    mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
+    mappings = normalize_remark_type_mappings(mapping_df)
+    if mappings:
         st.markdown("**已解析映射规则（按优先级排序）**")
         st.dataframe(pd.DataFrame(mappings), use_container_width=True)
     else:
