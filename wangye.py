@@ -902,8 +902,145 @@ def process_remark_type_file(file_path, remark_col, mappings, progress_callback=
     return output_path
 
 
+def get_remark_type_mappings_from_text(mapping_text):
+    mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
+    return normalize_remark_type_mappings(mapping_df)
+
+
+def log_status(log_area, message, level='info'):
+    if level == 'success':
+        log_area.success(message)
+    elif level == 'warning':
+        log_area.warning(message)
+    elif level == 'error':
+        log_area.error(message)
+    else:
+        log_area.info(message)
+
+
+def render_remark_type_tab():
+    st.header("备注招生类型提取")
+    st.markdown(
+        "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
+    )
+    st.markdown(
+        "本页已优化为“文本输入 + 按钮生成表格预览”的流程：先填写映射规则，生成预览；再上传文件并开始提取。"
+    )
+
+    if 'remark_mapping_text' not in st.session_state:
+        st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+    if 'remark_mappings' not in st.session_state:
+        st.session_state.remark_mappings = []
+    if 'remark_mapping_error' not in st.session_state:
+        st.session_state.remark_mapping_error = ''
+
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        st.subheader("1. 填写映射规则")
+        with st.form("remark_mapping_form"):
+            st.text_area(
+                "映射规则内容（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
+                value=st.session_state.remark_mapping_text,
+                height=260,
+                key="remark_mapping_text_input"
+            )
+            st.markdown(
+                "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
+            )
+            parse_clicked = st.form_submit_button("生成映射预览")
+
+        sample_clicked = st.button("加载示例规则", key="load_example_remark_mapping")
+
+        if sample_clicked:
+            st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+            st.session_state.remark_mapping_text_input = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+            st.session_state.remark_mappings = get_remark_type_mappings_from_text(DEFAULT_REMARK_TYPE_MAPPING_TEXT)
+            st.session_state.remark_mapping_error = ''
+
+        if parse_clicked:
+            st.session_state.remark_mapping_text = st.session_state.remark_mapping_text_input
+            st.session_state.remark_mappings = get_remark_type_mappings_from_text(st.session_state.remark_mapping_text)
+            if not st.session_state.remark_mappings:
+                st.session_state.remark_mapping_error = "当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级"
+            else:
+                st.session_state.remark_mapping_error = ''
+
+    with col_right:
+        st.subheader("2. 映射规则预览")
+        if st.session_state.remark_mappings:
+            card_cols = st.columns(2)
+            for idx, item in enumerate(st.session_state.remark_mappings):
+                col = card_cols[idx % 2]
+                col.markdown(
+                    f"<div style='border:1px solid #e1e1e1; border-radius:12px; padding:12px; margin-bottom:12px; background:#f7f7f7;'>"
+                    f"<div style='font-size:14px; font-weight:700; margin-bottom:8px;'>备注查找字段</div>"
+                    f"<div style='margin-bottom:8px; color:#222;'>{item['备注查找字段']}</div>"
+                    f"<div style='color:#555; margin-bottom:4px;'><strong>输出招生类型：</strong>{item['输出招生类型']}</div>"
+                    f"<div style='color:#555;'><strong>优先级：</strong>{item['优先级']}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+        elif st.session_state.remark_mapping_error:
+            st.warning(st.session_state.remark_mapping_error)
+        else:
+            st.info("请点击“生成映射预览”查看规则预览。")
+
+    st.markdown("---")
+    st.subheader("3. 上传备注文件并提取招生类型")
+    uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
+    if uploaded_file is not None:
+        uploaded_bytes = uploaded_file.getvalue()
+        try:
+            df = pd.read_excel(BytesIO(uploaded_bytes), header=0, keep_default_na=False)
+        except Exception as e:
+            st.error(f"读取文件失败：{e}")
+            df = None
+
+        if df is not None:
+            columns = list(df.columns)
+            if not columns:
+                st.warning("上传文件未检测到列名，请检查文件格式")
+            else:
+                default_index = 0
+                for idx, col in enumerate(columns):
+                    if "备注" in str(col):
+                        default_index = idx
+                        break
+                remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
+
+                if st.button("开始提取招生类型", key="process_remark_type"):
+                    if not st.session_state.remark_mappings:
+                        st.warning("请先生成映射预览并确保至少有一条有效规则")
+                    else:
+                        progress_bar = st.progress(0)
+                        log_area = st.empty()
+                        log_status(log_area, "处理中...", level='info')
+                        temp_file = "temp_remark_type.xlsx"
+                        output_path = None
+                        try:
+                            with open(temp_file, "wb") as f:
+                                f.write(uploaded_bytes)
+                            output_path = process_remark_type_file(temp_file, remark_col, st.session_state.remark_mappings)
+                            progress_bar.progress(100)
+                            log_status(log_area, "处理完成！", level='success')
+                            st.balloons()
+
+                            with open(output_path, "rb") as f:
+                                bytes_data = f.read()
+                            b64 = base64.b64encode(bytes_data).decode()
+                            href = f'<a href="data:application/octet-stream;base64,{b64}" download="备注招生类型提取结果.xlsx">点击下载处理结果</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                        except Exception as e:
+                            log_status(log_area, f"处理过程中发生错误: {str(e)}", level='error')
+                        finally:
+                            if os.path.exists(temp_file):
+                                os.remove(temp_file)
+                            if output_path and os.path.exists(output_path):
+                                os.remove(output_path)
+
+
 def process_remarks_file(file_path, progress_callback=None):
-    """学业桥数据处理：上传文件第1行为标题，校验指定列；校对学校/专业/备注后按新格式导出。"""
+    """学业桥数据处理：上传文件第1行为标题，校验指定列；校对指定要求后按新格式导出。"""
     try:
         # 上传文件从第一行（标题行）开始读取
         df = pd.read_excel(file_path, header=0, dtype={
@@ -3090,124 +3227,7 @@ with tab6:
 
 # ====================== 备注招生类型提取 ======================
 with tab8:
-    st.header("备注招生类型提取")
-    st.markdown(
-        "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
-    )
-    st.markdown(
-        "本页已优化为“文本输入 + 按钮生成表格预览”的流程：先填写映射规则，生成预览；再上传文件并开始提取。"
-    )
-
-    if 'remark_mapping_text' not in st.session_state:
-        st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
-    if 'remark_mappings' not in st.session_state:
-        st.session_state.remark_mappings = []
-    if 'remark_mapping_error' not in st.session_state:
-        st.session_state.remark_mapping_error = ''
-
-    col_left, col_right = st.columns([2, 1])
-    with col_left:
-        st.subheader("1. 填写映射规则")
-        with st.form("remark_mapping_form"):
-            st.text_area(
-                "映射规则内容（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
-                value=st.session_state.remark_mapping_text,
-                height=260,
-                key="remark_mapping_text_input"
-            )
-            st.markdown(
-                "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
-            )
-            parse_clicked = st.form_submit_button("生成映射预览")
-            sample_clicked = st.button("加载示例规则", key="load_example_remark_mapping")
-
-        if sample_clicked:
-            st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
-            st.session_state.remark_mapping_text_input = DEFAULT_REMARK_TYPE_MAPPING_TEXT
-            mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(st.session_state.remark_mapping_text)) if st.session_state.remark_mapping_text else pd.DataFrame([])
-            st.session_state.remark_mappings = normalize_remark_type_mappings(mapping_df)
-            st.session_state.remark_mapping_error = ''
-
-        if parse_clicked:
-            st.session_state.remark_mapping_text = st.session_state.remark_mapping_text_input
-            mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(st.session_state.remark_mapping_text)) if st.session_state.remark_mapping_text else pd.DataFrame([])
-            st.session_state.remark_mappings = normalize_remark_type_mappings(mapping_df)
-            if not st.session_state.remark_mappings:
-                st.session_state.remark_mapping_error = "当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级"
-            else:
-                st.session_state.remark_mapping_error = ''
-
-    with col_right:
-        st.subheader("2. 映射规则预览")
-        if st.session_state.remark_mappings:
-            card_cols = st.columns(2)
-            for idx, item in enumerate(st.session_state.remark_mappings):
-                col = card_cols[idx % 2]
-                col.markdown(
-                    f"<div style='border:1px solid #e1e1e1; border-radius:12px; padding:12px; margin-bottom:12px; background:#f7f7f7;'>"
-                    f"<div style='font-size:14px; font-weight:700; margin-bottom:8px;'>备注查找字段</div>"
-                    f"<div style='margin-bottom:8px; color:#222;'>{item['备注查找字段']}</div>"
-                    f"<div style='color:#555; margin-bottom:4px;'><strong>输出招生类型：</strong>{item['输出招生类型']}</div>"
-                    f"<div style='color:#555;'><strong>优先级：</strong>{item['优先级']}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
-        elif st.session_state.remark_mapping_error:
-            st.warning(st.session_state.remark_mapping_error)
-        else:
-            st.info("请点击“生成映射预览”查看规则预览。")
-
-    st.markdown("---")
-    st.subheader("3. 上传备注文件并提取招生类型")
-    uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
-    if uploaded_file is not None:
-        uploaded_bytes = uploaded_file.getvalue()
-        try:
-            df = pd.read_excel(BytesIO(uploaded_bytes), header=0, keep_default_na=False)
-        except Exception as e:
-            st.error(f"读取文件失败：{e}")
-            df = None
-        if df is not None:
-            columns = list(df.columns)
-            if not columns:
-                st.warning("上传文件未检测到列名，请检查文件格式")
-            else:
-                default_index = 0
-                for idx, col in enumerate(columns):
-                    if "备注" in str(col):
-                        default_index = idx
-                        break
-                remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
-
-                if st.button("开始提取招生类型", key="process_remark_type"):
-                    if not st.session_state.remark_mappings:
-                        st.warning("请先生成映射预览并确保至少有一条有效规则")
-                    else:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        status_text.text("处理中...")
-                        temp_file = "temp_remark_type.xlsx"
-                        output_path = None
-                        try:
-                            with open(temp_file, "wb") as f:
-                                f.write(uploaded_bytes)
-                            output_path = process_remark_type_file(temp_file, remark_col, st.session_state.remark_mappings)
-                            progress_bar.progress(100)
-                            status_text.text("处理完成！")
-                            st.balloons()
-
-                            with open(output_path, "rb") as f:
-                                bytes_data = f.read()
-                            b64 = base64.b64encode(bytes_data).decode()
-                            href = f'<a href="data:application/octet-stream;base64,{b64}" download="备注招生类型提取结果.xlsx">点击下载处理结果</a>'
-                            st.markdown(href, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"处理过程中发生错误: {str(e)}")
-                        finally:
-                            if os.path.exists(temp_file):
-                                os.remove(temp_file)
-                            if output_path and os.path.exists(output_path):
-                                os.remove(output_path)
+    render_remark_type_tab()
 
 
 # ====================== tab7：招生计划工具======================
