@@ -938,11 +938,10 @@ def render_remark_type_tab():
     with col_left:
         st.subheader("1. 填写映射规则")
         with st.form("remark_mapping_form"):
-            st.text_area(
+            mapping_text_input = st.text_area(
                 "映射规则内容（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
                 value=st.session_state.remark_mapping_text,
                 height=260,
-                key="remark_mapping_text_input"
             )
             st.markdown(
                 "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
@@ -953,12 +952,12 @@ def render_remark_type_tab():
 
         if sample_clicked:
             st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
-            st.session_state.remark_mapping_text_input = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+            mapping_text_input = DEFAULT_REMARK_TYPE_MAPPING_TEXT
             st.session_state.remark_mappings = get_remark_type_mappings_from_text(DEFAULT_REMARK_TYPE_MAPPING_TEXT)
             st.session_state.remark_mapping_error = ''
 
         if parse_clicked:
-            st.session_state.remark_mapping_text = st.session_state.remark_mapping_text_input
+            st.session_state.remark_mapping_text = mapping_text_input
             st.session_state.remark_mappings = get_remark_type_mappings_from_text(st.session_state.remark_mapping_text)
             if not st.session_state.remark_mappings:
                 st.session_state.remark_mapping_error = "当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级"
