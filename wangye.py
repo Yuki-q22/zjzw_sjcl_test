@@ -3095,22 +3095,51 @@ with tab8:
         "从备注列中按自定义优先级提取招生类型，并标记包含“除了、不含、除外、没有”的记录。"
     )
     st.markdown(
-        "请先配置映射规则：备注查找字段、输出招生类型、优先级。优先级数值越小，匹配顺序越靠前。"
+        "本页已优化为“文本输入 + 按钮生成表格预览”的流程：先填写映射规则，生成预览；再上传文件并开始提取。"
     )
 
-    mapping_text = st.text_area(
-        "请输入映射规则（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
-        value=DEFAULT_REMARK_TYPE_MAPPING_TEXT,
-        height=240
-    )
-    mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(mapping_text)) if mapping_text else pd.DataFrame([])
-    mappings = normalize_remark_type_mappings(mapping_df)
-    if mappings:
-        st.markdown("**已解析映射规则（按优先级排序）**")
-        st.dataframe(pd.DataFrame(mappings), use_container_width=True)
-    else:
-        st.warning("当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级")
+    if 'remark_mapping_text' not in st.session_state:
+        st.session_state.remark_mapping_text = DEFAULT_REMARK_TYPE_MAPPING_TEXT
+    if 'remark_mappings' not in st.session_state:
+        st.session_state.remark_mappings = []
+    if 'remark_mapping_error' not in st.session_state:
+        st.session_state.remark_mapping_error = ''
 
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        st.subheader("1. 填写映射规则")
+        with st.form("remark_mapping_form"):
+            st.text_area(
+                "映射规则内容（每行一条，字段用制表符或竖线分隔）：备注查找字段\t输出招生类型\t优先级",
+                value=st.session_state.remark_mapping_text,
+                height=260,
+                key="remark_mapping_text_input"
+            )
+            st.markdown(
+                "示例：\n中外合作\t中外合作\t1\n高校专项\t高校专项\t2\n预科\t预科\t3"
+            )
+            parse_clicked = st.form_submit_button("生成映射预览")
+
+        if parse_clicked:
+            st.session_state.remark_mapping_text = st.session_state.remark_mapping_text_input
+            mapping_df = pd.DataFrame(parse_recruitment_type_mapping_text(st.session_state.remark_mapping_text)) if st.session_state.remark_mapping_text else pd.DataFrame([])
+            st.session_state.remark_mappings = normalize_remark_type_mappings(mapping_df)
+            if not st.session_state.remark_mappings:
+                st.session_state.remark_mapping_error = "当前未解析到有效映射规则，请检查格式是否为：备注查找字段  输出招生类型  优先级"
+            else:
+                st.session_state.remark_mapping_error = ''
+
+    with col_right:
+        st.subheader("2. 映射规则预览")
+        if st.session_state.remark_mappings:
+            st.dataframe(pd.DataFrame(st.session_state.remark_mappings), use_container_width=True)
+        elif st.session_state.remark_mapping_error:
+            st.warning(st.session_state.remark_mapping_error)
+        else:
+            st.info("请点击“生成映射预览”查看规则表格。")
+
+    st.markdown("---")
+    st.subheader("3. 上传备注文件并提取招生类型")
     uploaded_file = st.file_uploader("选择Excel文件", type=["xls", "xlsx"], key="remark_type_file")
     if uploaded_file is not None:
         uploaded_bytes = uploaded_file.getvalue()
@@ -3118,7 +3147,8 @@ with tab8:
             df = pd.read_excel(BytesIO(uploaded_bytes), header=0, keep_default_na=False)
         except Exception as e:
             st.error(f"读取文件失败：{e}")
-        else:
+            df = None
+        if df is not None:
             columns = list(df.columns)
             if not columns:
                 st.warning("上传文件未检测到列名，请检查文件格式")
@@ -3131,8 +3161,8 @@ with tab8:
                 remark_col = st.selectbox("备注查找字段", options=columns, index=default_index)
 
                 if st.button("开始提取招生类型", key="process_remark_type"):
-                    if not mappings:
-                        st.warning("请先填写至少一个映射规则")
+                    if not st.session_state.remark_mappings:
+                        st.warning("请先生成映射预览并确保至少有一条有效规则")
                     else:
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -3142,7 +3172,7 @@ with tab8:
                         try:
                             with open(temp_file, "wb") as f:
                                 f.write(uploaded_bytes)
-                            output_path = process_remark_type_file(temp_file, remark_col, mappings)
+                            output_path = process_remark_type_file(temp_file, remark_col, st.session_state.remark_mappings)
                             progress_bar.progress(100)
                             status_text.text("处理完成！")
                             st.balloons()
